@@ -1,0 +1,28 @@
+# ---------- Web framework ----------
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20      # form parsing (OAuth2 login form)
+
+# ---------- Config / validation ----------
+pydantic==2.10.4
+pydantic-settings==2.7.1      # reads .env into a typed Settings object
+email-validator==2.2.0        # backs Pydantic's EmailStr
+
+# ---------- Database ----------
+sqlalchemy[asyncio]==2.0.36   # ORM, async engine
+asyncpg==0.30.0               # async PostgreSQL driver
+alembic==1.14.0               # schema migrations
+
+# ---------- Cache ----------
+redis==5.2.1                  # async Redis client (search cache)
+
+# ---------- Auth ----------
+passlib[bcrypt]==1.7.4        # password hashing
+python-jose[cryptography]==3.3.0  # JWT encode/decode
+
+# ---------- External data source ----------
+httpx==0.28.1                 # async HTTP client (QuickCommerce API)
+
+# ---------- AI layer (Parts 8) ----------
+google-genai==0.3.0           # Gemini client
+mcp==1.2.0                    # Model Context Protocol server
