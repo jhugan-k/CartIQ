@@ -1,0 +1,22 @@
+# Local development database. Run:  docker compose up -d
+# Postgres is exposed on host port 5433 (5432 is often already in use).
+services:
+  postgres:
+    image: postgres:16
+    container_name: cartiq-postgres
+    environment:
+      POSTGRES_USER: cartiq
+      POSTGRES_PASSWORD: cartiq
+      POSTGRES_DB: cartiq
+    ports:
+      - "5433:5432"
+    volumes:
+      - cartiq_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cartiq"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  cartiq_pgdata:
