@@ -18,6 +18,10 @@ from services import mock_qc
 
 logger = logging.getLogger("cartiq.qc")
 
+# The QC API requires exact platform casing. We use lowercase everywhere
+# internally, so translate on the way out and lowercase again on the way in.
+_API_PLATFORM = {"blinkit": "BlinkIt", "zepto": "Zepto", "swiggy": "Swiggy"}
+
 
 class QuickCommerceError(Exception):
     """Raised when the upstream API call fails (network, auth, or no credits)."""
@@ -44,14 +48,21 @@ def _normalize_product(raw: dict, platform: str) -> Product:
 
 
 def _normalize_results(results: dict[str, list[dict]]) -> list[PlatformResults]:
-    """Map {platform: [raw, ...]} → [PlatformResults, ...]."""
-    return [
-        PlatformResults(
-            platform=platform,
-            products=[_normalize_product(raw, platform) for raw in raw_list],
+    """Map {platform: [raw, ...]} → [PlatformResults, ...].
+
+    Platform keys are lowercased so the rest of the app (compare, frontend)
+    always deals with our internal names regardless of the API's casing.
+    """
+    out = []
+    for platform, raw_list in results.items():
+        name = platform.lower()
+        out.append(
+            PlatformResults(
+                platform=name,
+                products=[_normalize_product(raw, name) for raw in (raw_list or [])],
+            )
         )
-        for platform, raw_list in results.items()
-    ]
+    return out
 
 
 async def groupsearch(
@@ -70,7 +81,8 @@ async def groupsearch(
         "q": query,
         "lat": lat,
         "lon": lon,
-        "platforms": ",".join(platforms),
+        # Translate our lowercase names to the API's exact casing.
+        "platforms": ",".join(_API_PLATFORM.get(p.lower(), p) for p in platforms),
     }
     if pincode:
         params["pincode"] = pincode
