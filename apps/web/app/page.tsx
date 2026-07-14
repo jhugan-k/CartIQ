@@ -21,6 +21,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { CartSidebar } from "@/components/cart-sidebar";
 import { WishlistMenu } from "@/components/wishlist-menu";
 import { LocationMenu } from "@/components/location-menu";
+import { BrandStrip } from "@/components/brand";
 
 const DEFAULT_PINCODE = "110063";
 
@@ -258,6 +259,7 @@ export default function ChatPage() {
                     </button>
                   ))}
                 </div>
+                <BrandStrip className="mt-8" />
               </div>
             ) : (
               <div className="flex flex-col gap-6">
