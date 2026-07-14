@@ -43,3 +43,6 @@ logs/
 # ---------- ML / data ----------
 *.pkl
 *.joblib
+
+# ---------- Local tooling ----------
+.claude/

@@ -17,12 +17,12 @@ alembic==1.14.0               # schema migrations
 redis==5.2.1                  # async Redis client (search cache)
 
 # ---------- Auth ----------
-passlib[bcrypt]==1.7.4        # password hashing
+bcrypt==5.0.0                 # password hashing (used directly; passlib is unmaintained)
 python-jose[cryptography]==3.3.0  # JWT encode/decode
 
 # ---------- External data source ----------
 httpx==0.28.1                 # async HTTP client (QuickCommerce API)
 
 # ---------- AI layer (Parts 8) ----------
-google-genai==0.3.0           # Gemini client
+google-genai==2.11.0          # Gemini client (2.x needed for thought-signature models)
 mcp==1.2.0                    # Model Context Protocol server

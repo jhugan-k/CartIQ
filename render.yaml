@@ -1,0 +1,48 @@
+# Render Blueprint — provisions the CartIQ API + a managed Postgres.
+# Redis is external (Upstash) — set REDIS_URL in the dashboard.
+# Docs: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: cartiq-api
+    runtime: python
+    rootDir: services/api
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    # Run migrations, then start the server. Render sets $PORT.
+    startCommand: "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+      # Auto-wired from the database defined below.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cartiq-db
+          property: connectionString
+      - key: JWT_SECRET_KEY
+        generateValue: true # Render generates a strong secret
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: JWT_EXPIRE_MINUTES
+        value: "1440"
+      - key: QUICKCOMMERCE_BASE_URL
+        value: https://api.quickcommerceapi.com
+      - key: USE_MOCK_QC
+        value: "true" # flip to false once QC credits are purchased
+      - key: GEMINI_MODEL
+        value: gemini-flash-lite-latest
+      - key: CACHE_TTL_SECONDS
+        value: "1800"
+      # Secrets / values set in the dashboard (sync:false = not stored in git):
+      - key: QUICKCOMMERCE_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: REDIS_URL # Upstash rediss:// URL
+        sync: false
+      - key: CORS_ORIGINS # your Vercel URL, e.g. https://cartiq.vercel.app
+        sync: false
+
+databases:
+  - name: cartiq-db
+    plan: free
