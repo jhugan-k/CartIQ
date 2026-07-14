@@ -4,7 +4,7 @@ uvicorn[standard]==0.34.0
 python-multipart==0.0.20      # form parsing (OAuth2 login form)
 
 # ---------- Config / validation ----------
-pydantic==2.10.4
+pydantic==2.13.4              # >=2.12.5 required by google-genai 2.11
 pydantic-settings==2.7.1      # reads .env into a typed Settings object
 email-validator==2.2.0        # backs Pydantic's EmailStr
 
