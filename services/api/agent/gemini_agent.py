@@ -21,8 +21,10 @@ from agent.context import current_pincode, current_user_id
 from agent.tools import DISPATCH, FUNCTION_DECLARATIONS
 
 _MAX_TOOL_ROUNDS = 5  # safety cap on tool-call iterations
-_HTTP_TIMEOUT_MS = 25_000  # per-request HTTP timeout
-_OVERALL_TIMEOUT_S = 30  # hard cap on the whole chat (all tool rounds)
+_HTTP_TIMEOUT_MS = 30_000  # per Gemini-request HTTP timeout
+# A live QC groupsearch takes ~15s, and a multi-item cart compare fans out
+# several of them, so the whole chat gets a generous cap.
+_OVERALL_TIMEOUT_S = 90  # hard cap on the whole chat (all tool rounds)
 
 # attempts=1 → no automatic backoff/retry. On the free Gemini tier a 429 then
 # surfaces immediately as a clean "try again" instead of the SDK sleeping for
@@ -88,8 +90,9 @@ async def run_chat(
         return await asyncio.wait_for(_drive(message, history), _OVERALL_TIMEOUT_S)
     except asyncio.TimeoutError as exc:
         raise GeminiError(
-            "The assistant took too long to respond (likely a rate limit). "
-            "Please try again in a few seconds."
+            "That took too long — fetching live prices for several items can be "
+            "slow. Try again (repeat searches are cached and much faster), or "
+            "compare fewer items at once."
         ) from exc
 
 

@@ -91,7 +91,8 @@ async def groupsearch(
     url = f"{settings.quickcommerce_base_url}/v1/groupsearch"
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        # Live QC searches take ~15s; give tail latency room.
+        async with httpx.AsyncClient(timeout=40.0) as client:
             resp = await client.get(url, params=params, headers=headers)
             resp.raise_for_status()
     except httpx.HTTPStatusError as exc:
