@@ -8,11 +8,15 @@ If settings.use_mock_qc is true, returns canned data instead of spending
 credits — the normalization path is identical either way.
 """
 
+import logging
+
 import httpx
 
 from config import settings
 from schemas.search import PlatformResults, Product
 from services import mock_qc
+
+logger = logging.getLogger("cartiq.qc")
 
 
 class QuickCommerceError(Exception):
@@ -78,12 +82,31 @@ async def groupsearch(
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.get(url, params=params, headers=headers)
             resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        # Surface the upstream status + body so failures are diagnosable.
+        body = exc.response.text[:600]
+        logger.warning("QC %s error: %s", exc.response.status_code, body)
+        raise QuickCommerceError(
+            f"QuickCommerce API returned {exc.response.status_code}: {body}"
+        ) from exc
     except httpx.HTTPError as exc:
-        raise QuickCommerceError(str(exc)) from exc
+        raise QuickCommerceError(f"QuickCommerce request failed: {exc}") from exc
 
     payload = resp.json()
-    results = payload.get("data", {}).get("results", {})
-    return _normalize_results(results)
+    try:
+        results = payload.get("data", {}).get("results", {})
+        return _normalize_results(results)
+    except Exception as exc:  # response shape differs from what we parse
+        logger.warning(
+            "QC parse failed. top-level keys=%s | data keys=%s | error=%s",
+            list(payload.keys()),
+            list((payload.get("data") or {}).keys()) if isinstance(payload.get("data"), dict) else type(payload.get("data")).__name__,
+            exc,
+        )
+        raise QuickCommerceError(
+            f"Failed to parse QuickCommerce response "
+            f"(top-level keys={list(payload.keys())}): {exc}"
+        ) from exc
 
 
 async def get_credits() -> dict:

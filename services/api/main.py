@@ -6,11 +6,13 @@ and exposes a /health check. Run locally with:
     uvicorn main:app --reload
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from config import settings
 from routers import alternatives, auth, cart, chat, compare, search, wishlist
+from services.qc_client import QuickCommerceError
 
 app = FastAPI(
     title="CartIQ API",
@@ -33,6 +35,13 @@ app.include_router(alternatives.router)
 app.include_router(wishlist.router)
 app.include_router(cart.router)
 app.include_router(chat.router)
+
+
+@app.exception_handler(QuickCommerceError)
+async def quickcommerce_error_handler(request: Request, exc: QuickCommerceError):
+    """Turn upstream QuickCommerce failures into a clean 502 with the reason,
+    instead of an opaque 500."""
+    return JSONResponse(status_code=502, content={"detail": str(exc)})
 
 
 @app.get("/health", tags=["health"])
