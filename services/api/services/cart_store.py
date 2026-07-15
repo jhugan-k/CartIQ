@@ -27,7 +27,11 @@ async def _save(user_id: str, items: list[dict]) -> None:
 
 
 async def add_item(
-    user_id: str, name: str, quantity: int = 1, added_by: str = "user"
+    user_id: str,
+    name: str,
+    quantity: int = 1,
+    added_by: str = "user",
+    platform: str | None = None,
 ) -> list[dict]:
     """Add an item, merging quantity if the same name already exists."""
     name = name.strip()
@@ -35,6 +39,8 @@ async def add_item(
     for it in items:
         if it["name"].lower() == name.lower():
             it["quantity"] += max(1, quantity)
+            if platform:  # a known recommendation updates the tag
+                it["platform"] = platform
             await _save(user_id, items)
             return items
     items.append(
@@ -43,6 +49,7 @@ async def add_item(
             "name": name,
             "quantity": max(1, quantity),
             "added_by": added_by,
+            "platform": platform,
         }
     )
     await _save(user_id, items)

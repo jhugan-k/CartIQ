@@ -70,6 +70,7 @@ export interface CartLineItem {
   name: string;
   quantity: number;
   added_by: "user" | "assistant";
+  platform?: "blinkit" | "zepto" | "swiggy" | null;
 }
 export interface CartState {
   items: CartLineItem[];

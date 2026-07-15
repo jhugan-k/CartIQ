@@ -53,7 +53,9 @@ SYSTEM_PROMPT = (
     "stock'. Only 'out_of_stock' means actually out of stock.\n"
     "- Cart: on 'add/remove ... to cart' CALL tool_add_to_cart / "
     "tool_remove_from_cart (never say you can't); confirm in one short line. Use "
-    "tool_view_cart when relevant."
+    "tool_view_cart when relevant. When you know which app is cheapest/best for an "
+    "item, pass its `platform` (blinkit/zepto/swiggy) to tool_add_to_cart so the "
+    "cart shows the right app."
 )
 
 

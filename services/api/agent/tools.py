@@ -118,13 +118,25 @@ async def tool_alternatives(product_name: str, brand: str = "") -> dict:
 
 # ---------- Virtual cart tools (mutate the shared per-user cart) ----------
 
-async def tool_add_to_cart(name: str, quantity: int = 1) -> dict:
-    """Add an item to the user's virtual cart."""
+_PLATFORMS = {"blinkit", "zepto", "swiggy"}
+
+
+async def tool_add_to_cart(name: str, quantity: int = 1, platform: str = "") -> dict:
+    """Add an item to the user's virtual cart, optionally tagged with the
+    recommended platform."""
     uid = current_user_id.get()
     if not uid:
         return {"error": "No signed-in user — cannot modify the cart."}
-    items = await cart_store.add_item(uid, name, int(quantity), added_by="assistant")
-    return {"ok": True, "added": {"name": name, "quantity": int(quantity)}, "cart": items}
+    plat = platform.strip().lower()
+    plat = plat if plat in _PLATFORMS else None
+    items = await cart_store.add_item(
+        uid, name, int(quantity), added_by="assistant", platform=plat
+    )
+    return {
+        "ok": True,
+        "added": {"name": name, "quantity": int(quantity), "platform": plat},
+        "cart": items,
+    }
 
 
 async def tool_remove_from_cart(name: str) -> dict:
@@ -220,6 +232,12 @@ FUNCTION_DECLARATIONS = [
                     type="STRING", description="Item name, e.g. 'Coke Zero'."
                 ),
                 "quantity": types.Schema(type="INTEGER"),
+                "platform": types.Schema(
+                    type="STRING",
+                    description="Recommended platform for this item: 'blinkit', "
+                    "'zepto', or 'swiggy'. Set it when you know the cheapest/"
+                    "available app; omit if unknown.",
+                ),
             },
             required=["name"],
         ),

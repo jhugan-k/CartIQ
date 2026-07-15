@@ -11,7 +11,10 @@ import {
   X,
 } from "lucide-react";
 import { Logo } from "@/components/logo";
+import { BrandMark, type Platform } from "@/components/brand";
 import type { CartLineItem } from "@/lib/api";
+
+const PLATFORMS: Platform[] = ["blinkit", "zepto", "swiggy"];
 
 interface Props {
   items: CartLineItem[];
@@ -108,8 +111,14 @@ export function CartSidebar({
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
+                      {it.platform && PLATFORMS.includes(it.platform) && (
+                        <BrandMark
+                          platform={it.platform}
+                          className="h-4 w-4 shrink-0 text-[8px]"
+                        />
+                      )}
                       <span className="truncate text-sm capitalize">{it.name}</span>
-                      {it.added_by === "assistant" && (
+                      {it.added_by === "assistant" && !it.platform && (
                         <span
                           title="Added by CartIQ"
                           className="inline-flex shrink-0 items-center gap-0.5 rounded bg-primary/15 px-1 py-0.5 text-[9px] font-medium text-primary"

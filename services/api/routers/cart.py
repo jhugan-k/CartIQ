@@ -22,7 +22,9 @@ async def get_cart(user: User = Depends(get_current_user)) -> CartState:
 async def add_to_cart(
     body: AddToCartRequest, user: User = Depends(get_current_user)
 ) -> CartState:
-    items = await cart_store.add_item(str(user.id), body.name, body.quantity, "user")
+    items = await cart_store.add_item(
+        str(user.id), body.name, body.quantity, "user", body.platform
+    )
     return CartState(items=items)
 
 

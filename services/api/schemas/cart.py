@@ -12,6 +12,8 @@ class CartLineItem(BaseModel):
     name: str
     quantity: int = 1
     added_by: str = "user"  # "user" or "assistant"
+    # Platform the AI recommends this item from (blinkit/zepto/swiggy), if known.
+    platform: str | None = None
 
 
 class CartState(BaseModel):
@@ -21,6 +23,7 @@ class CartState(BaseModel):
 class AddToCartRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     quantity: int = Field(default=1, ge=1)
+    platform: str | None = None
 
 
 class UpdateQtyRequest(BaseModel):
