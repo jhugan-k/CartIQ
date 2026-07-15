@@ -27,8 +27,10 @@ services:
         value: "1440"
       - key: QUICKCOMMERCE_BASE_URL
         value: https://api.quickcommerceapi.com
+      # Enforced by the blueprint so a deploy can't silently flip it back.
+      # "false" = live QuickCommerce API. Change here (not just the dashboard).
       - key: USE_MOCK_QC
-        value: "true" # flip to false once QC credits are purchased
+        value: "false"
       - key: GEMINI_MODEL
         value: gemini-flash-lite-latest
       - key: CACHE_TTL_SECONDS
