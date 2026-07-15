@@ -16,11 +16,18 @@ from routers.alternatives import alternatives as _alternatives_route
 from routers.compare import compare as _compare_route
 from routers.search import search as _search_route
 from schemas.compare import DEFAULT_PINCODE, CartCompareRequest, CartItem
-from services import cart_store
+from services import cart_store, geocode
 
 
 def _pincode() -> str:
     return current_pincode.get() or DEFAULT_PINCODE
+
+
+async def _location() -> tuple[float, float, str]:
+    """Resolve the current pincode to (lat, lon, pincode) for QC calls."""
+    pin = _pincode()
+    lat, lon = await geocode.pincode_to_latlon(pin)
+    return lat, lon, pin
 
 _MAX_PRODUCTS = 5  # cap products per platform sent back to the model
 
@@ -41,7 +48,8 @@ def _compact_product(p) -> dict:
 
 async def tool_search(query: str, platforms: str = "blinkit,zepto,swiggy") -> dict:
     """Search a single product across platforms."""
-    resp = await _search_route(q=query, platforms=platforms, pincode=_pincode())
+    lat, lon, pin = await _location()
+    resp = await _search_route(q=query, platforms=platforms, lat=lat, lon=lon, pincode=pin)
     return {
         "query": resp.query,
         "platforms": [
@@ -60,7 +68,10 @@ async def tool_compare(items: list[dict], platforms: str = "blinkit,zepto,swiggy
     cart_items = [
         CartItem(query=i["query"], quantity=int(i.get("quantity", 1))) for i in items
     ]
-    req = CartCompareRequest(items=cart_items, platforms=platform_list, pincode=_pincode())
+    lat, lon, pin = await _location()
+    req = CartCompareRequest(
+        items=cart_items, platforms=platform_list, lat=lat, lon=lon, pincode=pin
+    )
     resp = await _compare_route(req)
     return {
         "cheapest_platform": resp.cheapest_platform,
@@ -89,8 +100,9 @@ async def tool_compare(items: list[dict], platforms: str = "blinkit,zepto,swiggy
 
 async def tool_alternatives(product_name: str, brand: str = "") -> dict:
     """Find substitute products for an item by dropping its brand."""
+    lat, lon, pin = await _location()
     resp = await _alternatives_route(
-        product_name=product_name, brand=brand or None, pincode=_pincode()
+        product_name=product_name, brand=brand or None, lat=lat, lon=lon, pincode=pin
     )
     return {
         "searched": resp.query,

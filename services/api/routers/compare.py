@@ -43,6 +43,27 @@ async def _search_item(query: str, req: CartCompareRequest) -> list[PlatformResu
 
 # Filler words that shouldn't drive matching.
 _STOP = {"pack", "of", "the", "a", "combo", "buy", "get", "with"}
+
+# Brand/name synonyms — the query token on the left also counts as a match for
+# any of the tokens on the right (product names often use the formal brand).
+_SYNONYMS = {
+    "coke": {"coca", "cola"},
+    "coca": {"coke"},
+    "cola": {"coke"},
+    "pepsi": {"pepsico"},
+    "lays": {"lay"},
+    "maggi": {"maggie"},
+    "kurkure": {"kurkur"},
+    "dairymilk": {"cadbury"},
+    "sprite": {"limca"},
+}
+
+
+def _expand(tokens: set[str]) -> set[str]:
+    out = set(tokens)
+    for t in tokens:
+        out |= _SYNONYMS.get(t, set())
+    return out
 # Quantity units — tokens that describe pack size.
 _UNITS = {
     "ml", "l", "ltr", "litre", "liter", "g", "gm", "gms", "gram", "grams",
@@ -75,6 +96,7 @@ def _best_match(query: str, products: list[Product]) -> Product | None:
     q_name, q_size = _split_tokens(query)
     if not q_name and not q_size:
         return min(available, key=lambda p: p.offer_price)
+    q_name = _expand(q_name)  # let "coke" match "coca-cola", etc.
 
     def score(p: Product) -> int:
         p_name, p_size = _split_tokens(f"{p.name} {p.brand or ''} {p.quantity or ''}")
