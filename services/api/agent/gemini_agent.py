@@ -37,6 +37,12 @@ _HTTP_OPTIONS = types.HttpOptions(
 SYSTEM_PROMPT = (
     "You are CartIQ, a shopping assistant for Indian quick-commerce apps "
     "(Blinkit, Zepto, Swiggy Instamart).\n\n"
+    "CRITICAL — every message is a FRESH request:\n"
+    "- ALWAYS call a tool to look up the EXACT item in the user's CURRENT message, "
+    "and answer ONLY from that tool's result. NEVER reuse a price, product, or "
+    "platform from earlier in the conversation — prior turns are context for "
+    "follow-ups only, NEVER a source of prices. If the earlier answer was about a "
+    "different item, ignore its numbers entirely and search the new item.\n\n"
     "STYLE — be brief and to the point:\n"
     "- Lead with the answer in one sentence (e.g. 'Zepto is cheapest at ₹133').\n"
     "- Prefer a compact bullet list or small table over paragraphs. No preamble, "
@@ -67,9 +73,12 @@ class GeminiError(Exception):
     """Raised when the Gemini API call fails (quota, transient, etc.)."""
 
 
+_MAX_HISTORY = 8  # keep only recent turns so old prices can't anchor the model
+
+
 def _history_to_contents(history: list[ChatMessage]) -> list[types.Content]:
     contents: list[types.Content] = []
-    for m in history:
+    for m in history[-_MAX_HISTORY:]:
         role = "model" if m.role == "model" else "user"
         contents.append(types.Content(role=role, parts=[types.Part.from_text(text=m.text)]))
     return contents
