@@ -1,11 +1,17 @@
 """Compare route: POST /cart/compare — price a cart on every platform.
 
-For each cart item we search every platform, pick the cheapest AVAILABLE match
-per platform, and sum per platform. The platform with the lowest total wins.
-Per-item searches run concurrently (asyncio.gather) since they're independent.
+For each cart item we search every platform, pick the best-MATCHING available
+product per platform, and sum per platform. The platform with the lowest total
+wins. Per-item searches run concurrently (asyncio.gather) since they're
+independent.
+
+Matching matters: the real API returns 50-80 loosely-related products per query,
+so taking the globally cheapest grabs irrelevant tiny items (a sachet, a random
+SKU) and produces nonsense totals. We rank by query-token overlap first.
 """
 
 import asyncio
+import re
 
 from fastapi import APIRouter
 
@@ -35,9 +41,50 @@ async def _search_item(query: str, req: CartCompareRequest) -> list[PlatformResu
     return results
 
 
-def _cheapest_available(products: list[Product]) -> Product | None:
+# Filler words that shouldn't drive matching.
+_STOP = {"pack", "of", "the", "a", "combo", "buy", "get", "with"}
+# Quantity units — tokens that describe pack size.
+_UNITS = {
+    "ml", "l", "ltr", "litre", "liter", "g", "gm", "gms", "gram", "grams",
+    "kg", "kgs", "kilo", "pc", "pcs", "piece", "pieces", "dozen", "no", "nos",
+}
+
+
+def _split_tokens(text: str) -> tuple[set[str], set[str]]:
+    """Return (name_tokens, size_tokens). Splitting letter-runs from digit-runs
+    makes "750ml" and "750 ml" tokenize identically → {'750','ml'}."""
+    toks = set(re.findall(r"[a-z]+|\d+", text.lower()))
+    size = {t for t in toks if t.isdigit() or t in _UNITS}
+    name = toks - size - _STOP
+    return name, size
+
+
+def _best_match(query: str, products: list[Product]) -> Product | None:
+    """Pick the available product that best matches the query.
+
+    Scores products by query-token overlap, weighting SIZE/quantity tokens
+    heavily so "milk 1L" doesn't match a 200ml pack and "24 eggs" doesn't match
+    a 6-pack. Size is matched against the product's pack size (`quantity`) too,
+    since that's where it usually lives. Ties break to the cheapest. Falls back
+    to the API's top-ranked result when nothing matches.
+    """
     available = [p for p in products if p.available]
-    return min(available, key=lambda p: p.offer_price) if available else None
+    if not available:
+        return None
+
+    q_name, q_size = _split_tokens(query)
+    if not q_name and not q_size:
+        return min(available, key=lambda p: p.offer_price)
+
+    def score(p: Product) -> int:
+        p_name, p_size = _split_tokens(f"{p.name} {p.brand or ''} {p.quantity or ''}")
+        return len(q_name & p_name) * 2 + len(q_size & p_size) * 3
+
+    best = max(score(p) for p in available)
+    if best == 0:
+        return available[0]
+    candidates = [p for p in available if score(p) == best]
+    return min(candidates, key=lambda p: p.offer_price)
 
 
 @router.post("/cart/compare", response_model=CartCompareResponse)
@@ -56,7 +103,7 @@ async def compare(req: CartCompareRequest) -> CartCompareResponse:
         by_platform = {r.platform: r.products for r in results}
         for platform in req.platforms:
             pt = totals[platform]
-            best = _cheapest_available(by_platform.get(platform, []))
+            best = _best_match(item.query, by_platform.get(platform, []))
             if best is None:
                 pt.unavailable.append(item.query)
                 pt.line_items.append(
