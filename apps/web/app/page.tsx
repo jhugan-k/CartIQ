@@ -288,10 +288,15 @@ export default function ChatPage() {
                     <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border bg-surface">
                       <LogoMark className="h-5 w-5" />
                     </span>
-                    <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-md border border-border bg-surface px-4 py-3.5">
-                      <span className="typing-dot" />
-                      <span className="typing-dot" />
-                      <span className="typing-dot" />
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex w-fit items-center gap-1.5 rounded-2xl rounded-tl-md border border-border bg-surface px-4 py-3.5">
+                        <span className="typing-dot" />
+                        <span className="typing-dot" />
+                        <span className="typing-dot" />
+                      </div>
+                      <span className="pl-1 text-[11px] text-faint">
+                        QuickCommerce API may take longer to respond for multiple items.
+                      </span>
                     </div>
                   </div>
                 )}
