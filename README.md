@@ -1,4 +1,4 @@
-# CartIQ 🛒
+# CartIQ 🛒 [https://cart-iq-phi.vercel.app]
 
 A quick-commerce **cart comparator** for Indian platforms (Blinkit, Zepto, Swiggy Instamart). Build a cart once, see the total cost across every platform side by side — no more opening three apps.
 
@@ -25,7 +25,7 @@ CartIQ is driven by a **natural-language chat interface**: you type what you wan
 
 - **Natural-language interface** — ask in plain English; a Gemini agent picks the right tools and replies with a clean comparison.
 - **Cart comparison** — price a whole basket across every app and get the cheapest platform, with a per-item breakdown.
-- **Shared virtual cart** — you *and* the AI manage the same cart; each item is tagged with the app it's recommended from.
+- **Shared virtual cart** — you and the AI manage the same cart; each item is tagged with the app it's recommended from.
 - **Wishlist** — save products you buy often for quick recall (no prices stored until you search).
 - **Fake-discount detection** — flags "discounts" where the offer price equals the MRP.
 - **Location-aware pricing** — your pincode is geocoded to coordinates so results reflect your area.
@@ -63,19 +63,4 @@ cd apps/web
 npm install
 npm run dev                       # http://localhost:3000
 ```
-
-## Project structure
-
-```
-CartIQ/
-├── apps/
-│   └── web/                 # Next.js frontend (chat UI, cart, wishlist)
-└── services/
-    └── api/                 # FastAPI backend
-        ├── routers/         # HTTP routes (auth, search, compare, cart, chat …)
-        ├── agent/           # Gemini agent + tools (function calling)
-        ├── services/        # QC client, Redis cache, cart store, geocoding
-        ├── models/          # SQLAlchemy ORM models
-        ├── schemas/         # Pydantic request/response models
-        └── mcp_server.py    # MCP server exposing the tools
-```
+Thanks for Visiting!
