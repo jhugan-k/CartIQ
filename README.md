@@ -5,7 +5,8 @@ A quick-commerce **cart comparator** for Indian platforms (Blinkit, Zepto, Swigg
 CartIQ is driven by a **natural-language chat interface**: you type what you want, a Gemini agent calls the right tools (search, compare, find alternatives, wishlist), and replies with a clean comparison.
 
 ## Architecture
-<figure TBI>
+<img width="1440" height="2260" alt="image" src="https://github.com/user-attachments/assets/b27e3ef1-52ca-47b5-9e17-2be4f828f5b4" />
+
 
 ## Tech Stack
 
