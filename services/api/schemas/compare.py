@@ -39,6 +39,9 @@ class PlatformLineItem(BaseModel):
     units: int = 1  # how many of this item the user wanted
     line_total: float | None = None  # offer_price * units
     available: bool = True
+    # "ok" | "out_of_stock" (platform had it but unavailable) |
+    # "no_data" (the API returned nothing for this platform — NOT out of stock)
+    status: str = "ok"
 
 
 class PlatformTotal(BaseModel):

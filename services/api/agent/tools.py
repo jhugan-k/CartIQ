@@ -77,6 +77,7 @@ async def tool_compare(items: list[dict], platforms: str = "blinkit,zepto,swiggy
                         "units": li.units,
                         "line_total": li.line_total,
                         "available": li.available,
+                        "status": li.status,
                     }
                     for li in t.line_items
                 ],

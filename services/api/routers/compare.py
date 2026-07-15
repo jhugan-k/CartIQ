@@ -103,11 +103,20 @@ async def compare(req: CartCompareRequest) -> CartCompareResponse:
         by_platform = {r.platform: r.products for r in results}
         for platform in req.platforms:
             pt = totals[platform]
-            best = _best_match(item.query, by_platform.get(platform, []))
+            products = by_platform.get(platform) or []
+            best = _best_match(item.query, products)
             if best is None:
+                # Distinguish "the API gave us nothing for this platform" from
+                # "the platform has it but it's out of stock" — very different!
+                reason = "no_data" if not products else "out_of_stock"
                 pt.unavailable.append(item.query)
                 pt.line_items.append(
-                    PlatformLineItem(query=item.query, units=item.quantity, available=False)
+                    PlatformLineItem(
+                        query=item.query,
+                        units=item.quantity,
+                        available=False,
+                        status=reason,
+                    )
                 )
                 continue
             line_total = round(best.offer_price * item.quantity, 2)
