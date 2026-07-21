@@ -177,7 +177,9 @@ async def _drive(message: str, history: list[ChatMessage]) -> tuple[str, list[st
                 types.Part.from_function_response(name=fc.name, response=result)
             )
 
-        contents.append(types.Content(role="tool", parts=response_parts))
+        # gemini expects function results back under the "user" role — "tool" is
+        # the OpenAI convention and is rejected here with a 400.
+        contents.append(types.Content(role="user", parts=response_parts))
 
     return (
         "I wasn't able to finish that in a reasonable number of steps. "
