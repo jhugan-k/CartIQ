@@ -37,7 +37,7 @@ class User(Base):
     )
     #  timestamp of when the user was created, defaults to current time
 
-    # ORM-side conveniences — no extra columns. Deleting a user cascades to both.
+    # oRM-side conveniences — no extra columns. Deleting a user cascades to both.
     wishlist_items: Mapped[list["WishlistItem"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",

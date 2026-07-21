@@ -84,7 +84,7 @@ export default function ChatPage() {
     if (!loading && !user) router.replace("/login");
   }, [loading, user, router]);
 
-  // Persist the chosen pincode across sessions.
+  // persist the chosen pincode across sessions.
   useEffect(() => {
     const saved = localStorage.getItem("cartiq_pincode");
     if (saved) setPincode(saved);
@@ -132,7 +132,7 @@ export default function ChatPage() {
       try {
         const res = await api.chat(trimmed, history, pincode);
         setMessages((m) => [...m, { role: "model", text: res.reply, tools: res.tools_used }]);
-        // The agent may have changed the cart — pull the latest.
+        // the agent may have changed the cart — pull the latest.
         if (res.tools_used.some((t) => t.includes("cart"))) refreshCart();
       } catch (err) {
         setError(err instanceof ApiError ? err.message : "Request failed");

@@ -25,6 +25,8 @@ _credentials_exc = HTTPException(
 )
 
 
+# the auth gate: pull the Bearer token, verify it, and load that user from the DB.
+# any route declaring Depends(get_current_user) is protected automatically.
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),

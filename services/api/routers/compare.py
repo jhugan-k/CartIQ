@@ -28,6 +28,7 @@ from services.redis_client import get_cache, search_cache_key, set_cache
 router = APIRouter(tags=["compare"])
 
 
+# search one cart item, reusing the same Redis cache the /search route writes to.
 async def _search_item(query: str, req: CartCompareRequest) -> list[PlatformResults]:
     """Cached search for a single cart item (shares the /search cache)."""
     key = search_cache_key(query, req.lat, req.lon, req.pincode)
@@ -41,10 +42,10 @@ async def _search_item(query: str, req: CartCompareRequest) -> list[PlatformResu
     return results
 
 
-# Filler words that shouldn't drive matching.
+# filler words that shouldn't drive matching.
 _STOP = {"pack", "of", "the", "a", "combo", "buy", "get", "with"}
 
-# Brand/name synonyms — the query token on the left also counts as a match for
+# common Brand/name synonyms — the query token on the left also counts as a match for
 # any of the tokens on the right (product names often use the formal brand).
 _SYNONYMS = {
     "coke": {"coca", "cola"},
@@ -59,18 +60,21 @@ _SYNONYMS = {
 }
 
 
+# widen the query's words with known synonyms so "coke" can match "coca-cola".
 def _expand(tokens: set[str]) -> set[str]:
     out = set(tokens)
     for t in tokens:
         out |= _SYNONYMS.get(t, set())
     return out
-# Quantity units — tokens that describe pack size.
+# quantity units — tokens that describe pack size.
 _UNITS = {
     "ml", "l", "ltr", "litre", "liter", "g", "gm", "gms", "gram", "grams",
     "kg", "kgs", "kilo", "pc", "pcs", "piece", "pieces", "dozen", "no", "nos",
 }
 
 
+# break text into name words vs size words, splitting letters from digits so
+# "750ml" and "750 ml" both become {'750','ml'} and therefore compare equal.
 def _split_tokens(text: str) -> tuple[set[str], set[str]]:
     """Return (name_tokens, size_tokens). Splitting letter-runs from digit-runs
     makes "750ml" and "750 ml" tokenize identically → {'750','ml'}."""
@@ -80,6 +84,8 @@ def _split_tokens(text: str) -> tuple[set[str], set[str]]:
     return name, size
 
 
+# choose which product actually answers the query, scoring word overlap with
+# size weighted highest, then breaking ties by price (never price alone).
 def _best_match(query: str, products: list[Product]) -> Product | None:
     """Pick the available product that best matches the query.
 
@@ -109,14 +115,16 @@ def _best_match(query: str, products: list[Product]) -> Product | None:
     return min(candidates, key=lambda p: p.offer_price)
 
 
+# price every cart item on every platform and report which platform wins.
+# searches run concurrently, so total time ≈ the slowest single search.
 @router.post("/cart/compare", response_model=CartCompareResponse)
 async def compare(req: CartCompareRequest) -> CartCompareResponse:
-    # Fire all item searches concurrently.
+    # fire all item searches concurrently.
     searches = await asyncio.gather(
         *(_search_item(item.query, req) for item in req.items)
     )
 
-    # Build an empty priced cart per platform.
+    # build an empty priced cart per platform.
     totals: dict[str, PlatformTotal] = {
         p: PlatformTotal(platform=p) for p in req.platforms
     }
@@ -128,7 +136,7 @@ async def compare(req: CartCompareRequest) -> CartCompareResponse:
             products = by_platform.get(platform) or []
             best = _best_match(item.query, products)
             if best is None:
-                # Distinguish "the API gave us nothing for this platform" from
+                # distinguish "the API gave us nothing for this platform" from
                 # "the platform has it but it's out of stock" — very different!
                 reason = "no_data" if not products else "out_of_stock"
                 pt.unavailable.append(item.query)
@@ -155,7 +163,7 @@ async def compare(req: CartCompareRequest) -> CartCompareResponse:
                 )
             )
 
-    # Winner = platform with a full cart (nothing unavailable) at lowest total.
+    # winner = platform with a full cart (nothing unavailable) at lowest total.
     complete = [pt for pt in totals.values() if not pt.unavailable]
     pool = complete or list(totals.values())
     cheapest = min(pool, key=lambda pt: pt.total).platform if pool else None

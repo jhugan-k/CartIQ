@@ -12,7 +12,7 @@ class CartLineItem(BaseModel):
     name: str
     quantity: int = 1
     added_by: str = "user"  # "user" or "assistant"
-    # Platform the AI recommends this item from (blinkit/zepto/swiggy), if known.
+    # platform the AI recommends this item from (blinkit/zepto/swiggy), if known.
     platform: str | None = None
 
 

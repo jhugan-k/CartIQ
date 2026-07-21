@@ -13,11 +13,13 @@ from utils.auth import create_access_token, hash_password, verify_password
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+# look a user up by email (used by both register and login).
 async def _get_user_by_email(db: AsyncSession, email: str) -> User | None:
     result = await db.execute(select(User).where(User.email == email))
     return result.scalar_one_or_none()
 
 
+# create a new account, reject duplicate emails, and return a fresh token.
 @router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)
 async def register(body: UserRegister, db: AsyncSession = Depends(get_db)) -> Token:
     if await _get_user_by_email(db, body.email):
@@ -32,6 +34,7 @@ async def register(body: UserRegister, db: AsyncSession = Depends(get_db)) -> To
     return Token(access_token=create_access_token(str(user.id)))
 
 
+# verify the email/password pair and hand back a signed JWT.
 @router.post("/login", response_model=Token)
 async def login(body: UserRegister, db: AsyncSession = Depends(get_db)) -> Token:
     user = await _get_user_by_email(db, body.email)
@@ -43,6 +46,7 @@ async def login(body: UserRegister, db: AsyncSession = Depends(get_db)) -> Token
     return Token(access_token=create_access_token(str(user.id)))
 
 
+# return the currently signed-in user (proves the token works).
 @router.get("/me", response_model=UserResponse)
 async def me(user: User = Depends(get_current_user)) -> User:
     return user

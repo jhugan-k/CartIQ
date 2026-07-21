@@ -35,9 +35,9 @@ class WishlistItem(Base):
         nullable=False,
     )
     product_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    # The search term used to look this product up (e.g. "amul butter").
+    # the search term used to look this product up (e.g. "amul butter").
     product_query: Mapped[str] = mapped_column(String(255), nullable=False)
-    # Known platform-specific item IDs, e.g. {"blinkit": "abc", "zepto": "xyz"}.
+    # known platform-specific item IDs, e.g. {"blinkit": "abc", "zepto": "xyz"}.
     # JSONB so adding a new platform needs no schema migration.
     platform_item_ids: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

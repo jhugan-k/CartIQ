@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # --- QuickCommerce API ---
     quickcommerce_api_key: str
     quickcommerce_base_url: str = "https://api.quickcommerceapi.com"
-    # When true, the QC client returns canned data instead of calling the paid
+    # when true, the QC client returns canned data instead of calling the paid
     # API. Lets us build/test without spending credits (trial is expired).
     use_mock_qc: bool = True
 

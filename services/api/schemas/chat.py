@@ -15,7 +15,7 @@ class ChatRequest(BaseModel):
 
     message: str = Field(min_length=1)
     history: list[ChatMessage] = Field(default_factory=list)
-    # Delivery pincode for location-accurate prices (optional).
+    # delivery pincode for location-accurate prices (optional).
     pincode: str | None = None
 
 

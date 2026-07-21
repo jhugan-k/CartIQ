@@ -15,6 +15,7 @@ from services.redis_client import get_cache, search_cache_key, set_cache
 router = APIRouter(tags=["alternatives"])
 
 
+# strip the brand off a product name to get a broader search term.
 def _vaguer_query(product_name: str, brand: str | None) -> str:
     """Drop the brand from the name; fall back to dropping the first word."""
     name = product_name.strip()
@@ -26,6 +27,7 @@ def _vaguer_query(product_name: str, brand: str | None) -> str:
     return " ".join(parts[1:]) if len(parts) > 1 else name
 
 
+# find substitutes for an item by searching the brand-stripped term instead.
 @router.get("/alternatives", response_model=SearchResponse)
 async def alternatives(
     product_name: str = Query(min_length=1),

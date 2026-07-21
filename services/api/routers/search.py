@@ -10,6 +10,8 @@ from services.redis_client import get_cache, search_cache_key, set_cache
 router = APIRouter(tags=["search"])
 
 
+# search a product across platforms, serving from cache when possible so we
+# don't spend a vendor API credit on a repeat query.
 @router.get("/search", response_model=SearchResponse)
 async def search(
     q: str = Query(min_length=1, description="Product to search for"),

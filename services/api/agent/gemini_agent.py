@@ -76,6 +76,8 @@ class GeminiError(Exception):
 _MAX_HISTORY = 8  # keep only recent turns so old prices can't anchor the model
 
 
+# convert recent chat turns into Gemini's message format, dropping older ones
+# so stale prices can't anchor the model's answer.
 def _history_to_contents(history: list[ChatMessage]) -> list[types.Content]:
     contents: list[types.Content] = []
     for m in history[-_MAX_HISTORY:]:
@@ -84,10 +86,13 @@ def _history_to_contents(history: list[ChatMessage]) -> list[types.Content]:
     return contents
 
 
+# pull the plain-text answer out of a model response.
 def _extract_text(parts) -> str:
     return "".join(p.text for p in parts if getattr(p, "text", None)).strip()
 
 
+# public entrypoint: set per-request context and run the agent under a hard
+# timeout so a slow vendor call can never hang the request forever.
 async def run_chat(
     message: str,
     history: list[ChatMessage],
@@ -101,7 +106,7 @@ async def run_chat(
     """
     if not settings.gemini_api_key:
         raise GeminiNotConfigured("GEMINI_API_KEY is not set")
-    # Make the user id + location visible to the tools for this request.
+    # make the user id + location visible to the tools for this request.
     current_user_id.set(user_id)
     current_pincode.set(pincode)
     try:
@@ -114,6 +119,8 @@ async def run_chat(
         ) from exc
 
 
+# the function-calling loop: ask Gemini, run any tools it requests, feed the
+# results back, and repeat until it returns a normal text reply.
 async def _drive(message: str, history: list[ChatMessage]) -> tuple[str, list[str]]:
     client = genai.Client(api_key=settings.gemini_api_key, http_options=_HTTP_OPTIONS)
     config = types.GenerateContentConfig(
@@ -150,10 +157,10 @@ async def _drive(message: str, history: list[ChatMessage]) -> tuple[str, list[st
         if not function_calls:
             return _extract_text(parts) or "(no response)", tools_used
 
-        # Record the model's tool-calling turn.
+        # record the model's tool-calling turn.
         contents.append(candidate.content)
 
-        # Execute each requested tool and collect the responses.
+        # execute each requested tool and collect the responses.
         response_parts = []
         for fc in function_calls:
             tools_used.append(fc.name)

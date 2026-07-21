@@ -18,18 +18,21 @@ from agent.tools import tool_alternatives, tool_compare, tool_search
 mcp = FastMCP("cartiq")
 
 
+# MCP tool: search a product across platforms.
 @mcp.tool()
 async def search(query: str, platforms: str = "blinkit,zepto,swiggy") -> dict:
     """Search a product across quick-commerce platforms with prices."""
     return await tool_search(query=query, platforms=platforms)
 
 
+# MCP tool: price a cart and find the cheapest platform.
 @mcp.tool()
 async def compare(items: list[dict], platforms: str = "blinkit,zepto,swiggy") -> dict:
     """Price a cart of items on each platform and find the cheapest."""
     return await tool_compare(items=items, platforms=platforms)
 
 
+# MCP tool: find substitutes for an item.
 @mcp.tool()
 async def alternatives(product_name: str, brand: str = "") -> dict:
     """Find substitute products for an item by dropping its brand."""

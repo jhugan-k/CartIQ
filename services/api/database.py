@@ -18,14 +18,14 @@ from sqlalchemy.orm import DeclarativeBase
 
 from config import settings
 
-# One engine for the whole app. It holds a pool of reusable DB connections.
+# one engine for the whole app. It holds a pool of reusable DB connections.
 engine = create_async_engine(
     settings.database_url,
     echo=False,        # set True to log every SQL statement while debugging
     pool_pre_ping=True,  # checks a connection is alive before using it
 )
 
-# Factory that produces AsyncSession objects (one per request).
+# factory that produces AsyncSession objects (one per request).
 # expire_on_commit=False keeps attributes accessible after commit, which avoids
 # unexpected lazy-load queries in async code.
 SessionLocal = async_sessionmaker(
@@ -39,6 +39,7 @@ class Base(DeclarativeBase):
     """Parent class for all ORM models."""
 
 
+# hand each request its own database session and guarantee it's closed after.
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Yield a session, close it when the request finishes."""
     async with SessionLocal() as session:

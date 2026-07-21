@@ -23,7 +23,7 @@ class Product(BaseModel):
     available: bool = True
     image_url: str | None = None
     deeplink: str | None = None
-    # Computed below — not sent by the API.
+    # computed below — not sent by the API.
     fake_discount: bool = False
 
     @model_validator(mode="after")

@@ -14,6 +14,8 @@ from schemas.chat import ChatRequest, ChatResponse
 router = APIRouter(tags=["chat"])
 
 
+# the natural-language entrypoint: hand the message to the Gemini agent and
+# translate any agent failure into a clean HTTP error.
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
     body: ChatRequest, user: User = Depends(get_current_user)

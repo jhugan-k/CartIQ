@@ -19,10 +19,12 @@ from schemas.compare import DEFAULT_PINCODE, CartCompareRequest, CartItem
 from services import cart_store, geocode
 
 
+# current request's pincode, falling back to the default.
 def _pincode() -> str:
     return current_pincode.get() or DEFAULT_PINCODE
 
 
+# resolve the request's pincode into coordinates for the vendor API.
 async def _location() -> tuple[float, float, str]:
     """Resolve the current pincode to (lat, lon, pincode) for QC calls."""
     pin = _pincode()
@@ -32,6 +34,7 @@ async def _location() -> tuple[float, float, str]:
 _MAX_PRODUCTS = 5  # cap products per platform sent back to the model
 
 
+# trim a product down to the few fields the model needs (keeps tokens cheap).
 def _compact_product(p) -> dict:
     return {
         "name": p.name,
@@ -46,6 +49,7 @@ def _compact_product(p) -> dict:
 
 # ---------- Tool implementations ----------
 
+# tool: search one product across platforms and return compact results.
 async def tool_search(query: str, platforms: str = "blinkit,zepto,swiggy") -> dict:
     """Search a single product across platforms."""
     lat, lon, pin = await _location()
@@ -62,6 +66,7 @@ async def tool_search(query: str, platforms: str = "blinkit,zepto,swiggy") -> di
     }
 
 
+# tool: price a multi-item cart on each platform and name the cheapest.
 async def tool_compare(items: list[dict], platforms: str = "blinkit,zepto,swiggy") -> dict:
     """Price a multi-item cart on each platform and find the cheapest."""
     platform_list = [p.strip() for p in platforms.split(",") if p.strip()]
@@ -98,6 +103,7 @@ async def tool_compare(items: list[dict], platforms: str = "blinkit,zepto,swiggy
     }
 
 
+# tool: find substitutes for an item the user can't get.
 async def tool_alternatives(product_name: str, brand: str = "") -> dict:
     """Find substitute products for an item by dropping its brand."""
     lat, lon, pin = await _location()
@@ -121,6 +127,7 @@ async def tool_alternatives(product_name: str, brand: str = "") -> dict:
 _PLATFORMS = {"blinkit", "zepto", "swiggy"}
 
 
+# tool: put an item in the user's cart, optionally tagged with the best app.
 async def tool_add_to_cart(name: str, quantity: int = 1, platform: str = "") -> dict:
     """Add an item to the user's virtual cart, optionally tagged with the
     recommended platform."""
@@ -139,6 +146,7 @@ async def tool_add_to_cart(name: str, quantity: int = 1, platform: str = "") -> 
     }
 
 
+# tool: take an item out of the user's cart by name.
 async def tool_remove_from_cart(name: str) -> dict:
     """Remove matching item(s) from the user's virtual cart by name."""
     uid = current_user_id.get()
@@ -148,6 +156,7 @@ async def tool_remove_from_cart(name: str) -> dict:
     return {"ok": True, "removed": name, "cart": items}
 
 
+# tool: read back what's currently in the user's cart.
 async def tool_view_cart() -> dict:
     """Return the current contents of the user's virtual cart."""
     uid = current_user_id.get()

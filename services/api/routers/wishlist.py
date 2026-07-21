@@ -18,6 +18,7 @@ from schemas.wishlist import WishlistItemCreate, WishlistItemResponse
 router = APIRouter(prefix="/wishlist", tags=["wishlist"])
 
 
+# list every product this user has saved.
 @router.get("", response_model=list[WishlistItemResponse])
 async def list_wishlist(
     user: User = Depends(get_current_user),
@@ -31,6 +32,7 @@ async def list_wishlist(
     return list(result.scalars().all())
 
 
+# save a product to the wishlist (names only — prices are fetched on demand).
 @router.post("", response_model=WishlistItemResponse, status_code=status.HTTP_201_CREATED)
 async def add_wishlist(
     body: WishlistItemCreate,
@@ -49,6 +51,7 @@ async def add_wishlist(
     return item
 
 
+# remove one saved product, 404 if it isn't theirs.
 @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_wishlist(
     item_id: uuid.UUID,

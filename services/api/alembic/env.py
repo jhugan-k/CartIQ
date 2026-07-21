@@ -23,14 +23,14 @@ import models  # noqa: F401  side-effect: registers all tables on Base.metadata
 # Alembic Config object — access to values in alembic.ini.
 config = context.config
 
-# Inject the real DB URL from settings, overriding the placeholder in the ini.
+# inject the real DB URL from settings, overriding the placeholder in the ini.
 config.set_main_option("sqlalchemy.url", settings.database_url)
 
 # Python logging setup from the ini file.
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Autogenerate compares this metadata against the live DB to detect changes.
+# autogenerate compares this metadata against the live DB to detect changes.
 target_metadata = Base.metadata
 
 

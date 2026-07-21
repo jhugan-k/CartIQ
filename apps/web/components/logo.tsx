@@ -1,4 +1,4 @@
-// CartIQ wordmark + SVG cart mark (no emoji — per design checklist).
+// cartIQ wordmark + SVG cart mark (no emoji — per design checklist).
 
 export function LogoMark({ className = "h-7 w-7" }: { className?: string }) {
   return (

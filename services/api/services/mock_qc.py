@@ -33,16 +33,17 @@ _CATALOG: dict[str, list[dict]] = {
     ],
 }
 
-# Generic fallback so any query returns something in mock mode.
+# generic fallback so any query returns something in mock mode.
 _GENERIC = [
     {"name": "{q} (Store Brand)", "brand": "Generic", "mrp": 99.0, "quantity": "1 unit"},
 ]
 
 
+# invent a believable per-platform price, occasionally a fake discount.
 def _platform_price(mrp: float, platform: str, idx: int) -> tuple[float, bool]:
     """Deterministic-ish per-platform offer price + availability."""
     rng = random.Random(f"{platform}-{mrp}-{idx}")
-    # Discount 0–18%; occasionally a fake discount (offer == mrp).
+    # discount 0–18%; occasionally a fake discount (offer == mrp).
     if rng.random() < 0.2:
         offer = mrp  # fake discount case
     else:
@@ -51,6 +52,7 @@ def _platform_price(mrp: float, platform: str, idx: int) -> tuple[float, bool]:
     return offer, available
 
 
+# build one fake product in the same shape the real vendor returns.
 def _raw_product(base: dict, platform: str, idx: int, query: str) -> dict:
     name = base["name"].format(q=query.title())
     mrp = base["mrp"]
@@ -71,6 +73,7 @@ def _raw_product(base: dict, platform: str, idx: int, query: str) -> dict:
     }
 
 
+# stand in for the vendor API so the app is fully usable without credits.
 def mock_groupsearch(query: str, platforms: list[str]) -> dict[str, list[dict]]:
     """Return {platform: [raw_product, ...]} mimicking data.results."""
     key = next((k for k in _CATALOG if k in query.lower()), None)

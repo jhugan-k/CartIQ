@@ -11,7 +11,7 @@ class WishlistItemCreate(BaseModel):
 
     product_name: str = Field(min_length=1, max_length=255)
     product_query: str = Field(min_length=1, max_length=255)
-    # Optional known platform item IDs — user may save just a name for now.
+    # optional known platform item IDs — user may save just a name for now.
     platform_item_ids: dict[str, str] = Field(default_factory=dict)
 
 

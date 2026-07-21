@@ -9,6 +9,6 @@ from contextvars import ContextVar
 
 current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default=None)
 
-# The delivery pincode for the current request — location changes prices and
+# the delivery pincode for the current request — location changes prices and
 # availability, so tools pass it to the search API (falls back to a default).
 current_pincode: ContextVar[str | None] = ContextVar("current_pincode", default=None)

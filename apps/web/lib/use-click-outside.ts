@@ -1,6 +1,7 @@
 import { useEffect, type RefObject } from "react";
 
 /** Call `onClose` when a mousedown/touch happens outside `ref` (while `active`). */
+// close a popover when the user clicks anywhere outside of it.
 export function useClickOutside(
   ref: RefObject<HTMLElement | null>,
   onClose: () => void,

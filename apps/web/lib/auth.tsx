@@ -1,7 +1,7 @@
 "use client";
 
-// Auth state shared across the app via React context.
-// Holds the current user (or null) and exposes login/register/logout.
+// auth state shared across the app via React context.
+// holds the current user (or null) and exposes login/register/logout.
 
 import {
   createContext,
@@ -22,11 +22,13 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null);
 
+// holds the signed-in user for the whole app and revalidates the saved token
+// once on mount, so a stale token logs the user out cleanly.
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // On mount, if a token exists, fetch the user to validate the session.
+  // on mount, if a token exists, fetch the user to validate the session.
   useEffect(() => {
     if (!getToken()) {
       setLoading(false);
@@ -63,6 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+// read the auth state from any component.
 export function useAuth(): AuthState {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");

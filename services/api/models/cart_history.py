@@ -35,9 +35,9 @@ class CartHistory(Base):
         index=True,
         nullable=False,
     )
-    # The items the user was comparing (names / queries / quantities).
+    # the items the user was comparing (names / queries / quantities).
     cart_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    # The per-platform prices and totals computed at comparison time.
+    # the per-platform prices and totals computed at comparison time.
     price_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

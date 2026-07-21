@@ -1,4 +1,4 @@
-// Recreated brand marks for the quick-commerce apps — pure CSS/SVG, no embedded
+// recreated brand marks for the quick-commerce apps — pure CSS/SVG, no embedded
 // images. Rounded, softly ringed so they blend onto the dark background.
 
 import { MapPin } from "lucide-react";

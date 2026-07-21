@@ -1,18 +1,21 @@
-// Thin client for the CartIQ FastAPI backend.
-// The JWT is kept in localStorage and attached as a Bearer token.
+// thin client for the CartIQ FastAPI backend.
+// the JWT is kept in localStorage and attached as a Bearer token.
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const TOKEN_KEY = "cartiq_token";
 
+// read the saved JWT (null during server render, where there's no window).
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem(TOKEN_KEY);
 }
 
+// persist the JWT after a successful login.
 export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
 }
 
+// forget the JWT on logout.
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
@@ -25,6 +28,8 @@ class ApiError extends Error {
   }
 }
 
+// one fetch wrapper for every call: attaches the token and turns non-2xx
+// responses into a typed ApiError carrying the backend's message.
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   headers.set("Content-Type", "application/json");

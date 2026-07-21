@@ -1,4 +1,4 @@
-// Renders the agent's markdown replies as real formatted content
+// renders the agent's markdown replies as real formatted content
 // (fixes raw **bold** / * bullets showing as plain text).
 
 import ReactMarkdown from "react-markdown";

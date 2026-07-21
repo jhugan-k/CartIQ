@@ -18,7 +18,7 @@ from services import mock_qc
 
 logger = logging.getLogger("cartiq.qc")
 
-# The QC API requires exact platform casing. We use lowercase everywhere
+# the QC API requires exact platform casing. We use lowercase everywhere
 # internally, so translate on the way out and lowercase again on the way in.
 _API_PLATFORM = {"blinkit": "BlinkIt", "zepto": "Zepto", "swiggy": "Swiggy"}
 
@@ -27,6 +27,7 @@ class QuickCommerceError(Exception):
     """Raised when the upstream API call fails (network, auth, or no credits)."""
 
 
+# translate one raw vendor product dict into our own clean Product shape.
 def _normalize_product(raw: dict, platform: str) -> Product:
     """Map one raw API product dict → our Product schema (fake_discount auto-set)."""
     images = raw.get("images") or []
@@ -47,6 +48,7 @@ def _normalize_product(raw: dict, platform: str) -> Product:
     )
 
 
+# convert the vendor's platform-keyed blob into our per-platform result list.
 def _normalize_results(results: dict[str, list[dict]]) -> list[PlatformResults]:
     """Map {platform: [raw, ...]} → [PlatformResults, ...].
 
@@ -65,6 +67,8 @@ def _normalize_results(results: dict[str, list[dict]]) -> list[PlatformResults]:
     return out
 
 
+# search one term across the given platforms and hand back normalized products.
+# this is the only place that talks to the vendor, so their format stops here.
 async def groupsearch(
     query: str,
     platforms: list[str],
@@ -81,7 +85,7 @@ async def groupsearch(
         "q": query,
         "lat": lat,
         "lon": lon,
-        # Translate our lowercase names to the API's exact casing.
+        # translate our lowercase names to the API's exact casing.
         "platforms": ",".join(_API_PLATFORM.get(p.lower(), p) for p in platforms),
     }
     if pincode:
@@ -91,12 +95,12 @@ async def groupsearch(
     url = f"{settings.quickcommerce_base_url}/v1/groupsearch"
 
     try:
-        # Live QC searches take ~15s; give tail latency room.
+        # live QC searches take ~15s; give tail latency room.
         async with httpx.AsyncClient(timeout=40.0) as client:
             resp = await client.get(url, params=params, headers=headers)
             resp.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        # Surface the upstream status + body so failures are diagnosable.
+        # surface the upstream status + body so failures are diagnosable.
         body = exc.response.text[:600]
         logger.warning("QC %s error: %s", exc.response.status_code, body)
         raise QuickCommerceError(
@@ -122,6 +126,7 @@ async def groupsearch(
         ) from exc
 
 
+# ask the vendor how many API credits are left (this call is free).
 async def get_credits() -> dict:
     """Fetch remaining credits (free call). Useful for a status endpoint."""
     headers = {"X-API-Key": settings.quickcommerce_api_key}

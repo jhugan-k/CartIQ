@@ -18,26 +18,28 @@ from services.redis_client import get_cache, set_cache
 
 _GEO_TTL = 60 * 60 * 24 * 30  # 30 days
 
-# First-3-digits of pincode → (lat, lon) of the city centre. Major metros.
+# first-3-digits of pincode → (lat, lon) of the city centre. Major metros.
 _METRO: dict[str, tuple[float, float]] = {
     "110": (28.6139, 77.2090),  # Delhi
-    "201": (28.5355, 77.3910),  # Noida
-    "122": (28.4595, 77.0266),  # Gurgaon
+    "201": (28.5355, 77.3910),  # noida
+    "122": (28.4595, 77.0266),  # gurgaon
     "400": (19.0760, 72.8777),  # Mumbai
-    "411": (18.5204, 73.8567),  # Pune
-    "560": (12.9716, 77.5946),  # Bengaluru
-    "500": (17.3850, 78.4867),  # Hyderabad
-    "600": (13.0827, 80.2707),  # Chennai
-    "700": (22.5726, 88.3639),  # Kolkata
-    "380": (23.0225, 72.5714),  # Ahmedabad
-    "302": (26.9124, 75.7873),  # Jaipur
-    "160": (30.7333, 76.7794),  # Chandigarh
-    "226": (26.8467, 80.9462),  # Lucknow
-    "462": (23.2599, 77.4126),  # Bhopal
-    "395": (21.1702, 72.8311),  # Surat
+    "411": (18.5204, 73.8567),  # pune
+    "560": (12.9716, 77.5946),  # bengaluru
+    "500": (17.3850, 78.4867),  # hyderabad
+    "600": (13.0827, 80.2707),  # chennai
+    "700": (22.5726, 88.3639),  # kolkata
+    "380": (23.0225, 72.5714),  # ahmedabad
+    "302": (26.9124, 75.7873),  # jaipur
+    "160": (30.7333, 76.7794),  # chandigarh
+    "226": (26.8467, 80.9462),  # lucknow
+    "462": (23.2599, 77.4126),  # bhopal
+    "395": (21.1702, 72.8311),  # surat
 }
 
 
+# turn a pincode into real coordinates, since the vendor keys results off lat/lon.
+# tries the built-in metro table, then a cached OpenStreetMap lookup, then Delhi.
 async def pincode_to_latlon(pincode: str | None) -> tuple[float, float]:
     pin = (pincode or "").strip()
     if not pin:
