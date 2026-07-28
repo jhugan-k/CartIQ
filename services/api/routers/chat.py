@@ -4,11 +4,12 @@ Auth-protected so the agent knows which user's cart to manage. Hands the message
 to the Gemini agent, which decides which tools to call and returns a reply.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from agent.gemini_agent import GeminiError, GeminiNotConfigured, run_chat
 from dependencies import get_current_user
 from models import User
+from rate_limit import limiter
 from schemas.chat import ChatRequest, ChatResponse
 
 router = APIRouter(tags=["chat"])
@@ -16,9 +17,12 @@ router = APIRouter(tags=["chat"])
 
 # the natural-language entrypoint: hand the message to the Gemini agent and
 # translate any agent failure into a clean HTTP error.
+# Tightest limit in the app: every call spends paid Gemini + vendor credits, so
+# it's metered PER USER (a leaked token can't drain the budget from one IP).
 @router.post("/chat", response_model=ChatResponse)
+@limiter.limit("15/minute;200/hour")
 async def chat(
-    body: ChatRequest, user: User = Depends(get_current_user)
+    request: Request, body: ChatRequest, user: User = Depends(get_current_user)
 ) -> ChatResponse:
     try:
         reply, tools_used = await run_chat(

@@ -5,8 +5,9 @@ the brand (or drop the first word) to make the query vaguer — "Amul Paneer" �
 "Paneer" — and search that. On-demand only, so it costs a credit only when asked.
 """
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 
+from rate_limit import limiter
 from schemas.compare import DEFAULT_LAT, DEFAULT_LON, DEFAULT_PINCODE
 from schemas.search import PlatformResults, SearchResponse
 from services import qc_client
@@ -28,8 +29,11 @@ def _vaguer_query(product_name: str, brand: str | None) -> str:
 
 
 # find substitutes for an item by searching the brand-stripped term instead.
+# Public (no auth) → keyed per IP. Each call can miss cache and hit the vendor API.
 @router.get("/alternatives", response_model=SearchResponse)
+@limiter.limit("30/minute")
 async def alternatives(
+    request: Request,
     product_name: str = Query(min_length=1),
     brand: str | None = Query(None),
     platforms: str = Query("blinkit,zepto,swiggy"),

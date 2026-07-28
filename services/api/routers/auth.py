@@ -1,12 +1,13 @@
 """Auth routes: register, login, me."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from dependencies import get_current_user
 from models import User
+from rate_limit import limiter
 from schemas.auth import Token, UserRegister, UserResponse
 from utils.auth import create_access_token, hash_password, verify_password
 
@@ -21,7 +22,10 @@ async def _get_user_by_email(db: AsyncSession, email: str) -> User | None:
 
 # create a new account, reject duplicate emails, and return a fresh token.
 @router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)
-async def register(body: UserRegister, db: AsyncSession = Depends(get_db)) -> Token:
+@limiter.limit("5/minute;20/hour")  # curb automated mass account creation (per IP)
+async def register(
+    request: Request, body: UserRegister, db: AsyncSession = Depends(get_db)
+) -> Token:
     if await _get_user_by_email(db, body.email):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -36,7 +40,10 @@ async def register(body: UserRegister, db: AsyncSession = Depends(get_db)) -> To
 
 # verify the email/password pair and hand back a signed JWT.
 @router.post("/login", response_model=Token)
-async def login(body: UserRegister, db: AsyncSession = Depends(get_db)) -> Token:
+@limiter.limit("10/minute;100/hour")  # slow password brute-force / stuffing (per IP)
+async def login(
+    request: Request, body: UserRegister, db: AsyncSession = Depends(get_db)
+) -> Token:
     user = await _get_user_by_email(db, body.email)
     if user is None or not verify_password(body.password, user.hashed_password):
         raise HTTPException(

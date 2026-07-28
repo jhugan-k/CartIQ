@@ -46,3 +46,5 @@ logs/
 
 # ---------- Local tooling ----------
 .claude/
+1.txt
+sniperbot.py

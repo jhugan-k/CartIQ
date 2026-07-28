@@ -9,8 +9,12 @@ and exposes a /health check. Run locally with:
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from config import settings
+from rate_limit import limiter
 from routers import alternatives, auth, cart, chat, compare, search, wishlist
 from services.qc_client import QuickCommerceError
 
@@ -19,6 +23,14 @@ app = FastAPI(
     version="1.0.0",
     description="Quick-commerce cart comparator across Blinkit, Zepto and Swiggy.",
 )
+
+# Rate limiting: register the shared limiter, a 429 handler (adds Retry-After
+# and X-RateLimit-* headers), and the middleware that enforces the global
+# default limit on every route. Per-route @limiter.limit(...) decorators layer
+# stricter limits on top.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,5 +57,6 @@ async def quickcommerce_error_handler(request: Request, exc: QuickCommerceError)
 
 
 @app.get("/health", tags=["health"])
-async def health() -> dict:
+@limiter.exempt  # infra health checks must never be throttled
+async def health(request: Request) -> dict:
     return {"status": "ok", "mock_qc": settings.use_mock_qc}

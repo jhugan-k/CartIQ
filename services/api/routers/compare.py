@@ -13,8 +13,9 @@ SKU) and produces nonsense totals. We rank by query-token overlap first.
 import asyncio
 import re
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
+from rate_limit import limiter
 from schemas.compare import (
     CartCompareRequest,
     CartCompareResponse,
@@ -117,8 +118,10 @@ def _best_match(query: str, products: list[Product]) -> Product | None:
 
 # price every cart item on every platform and report which platform wins.
 # searches run concurrently, so total time ≈ the slowest single search.
+# Tighter than /search: one call fans out to N concurrent vendor searches.
 @router.post("/cart/compare", response_model=CartCompareResponse)
-async def compare(req: CartCompareRequest) -> CartCompareResponse:
+@limiter.limit("15/minute")
+async def compare(request: Request, req: CartCompareRequest) -> CartCompareResponse:
     # fire all item searches concurrently.
     searches = await asyncio.gather(
         *(_search_item(item.query, req) for item in req.items)

@@ -6,13 +6,14 @@ it up. Prices are fetched live only when the user searches (lazy loading).
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from dependencies import get_current_user
 from models import User, WishlistItem
+from rate_limit import limiter
 from schemas.wishlist import WishlistItemCreate, WishlistItemResponse
 
 router = APIRouter(prefix="/wishlist", tags=["wishlist"])
@@ -34,7 +35,9 @@ async def list_wishlist(
 
 # save a product to the wishlist (names only — prices are fetched on demand).
 @router.post("", response_model=WishlistItemResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("30/minute")  # per-user write ceiling (DB insert)
 async def add_wishlist(
+    request: Request,
     body: WishlistItemCreate,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -53,7 +56,9 @@ async def add_wishlist(
 
 # remove one saved product, 404 if it isn't theirs.
 @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("30/minute")
 async def delete_wishlist(
+    request: Request,
     item_id: uuid.UUID,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
