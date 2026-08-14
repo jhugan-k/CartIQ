@@ -1,5 +1,12 @@
-# Render Blueprint — provisions the CartIQ API + a managed Postgres.
-# Redis is external (Upstash) — set REDIS_URL in the dashboard.
+# Render Blueprint — provisions the CartIQ API only.
+# Postgres is external (Neon) and Redis is external (Upstash/Redis Cloud); set
+# DATABASE_URL and REDIS_URL in the dashboard.
+#
+# Why the database isn't defined here: Render's free Postgres is suspended 30
+# days after creation, which took the whole service down (alembic can't connect
+# -> the start command short-circuits -> failed deploy). Neon's free tier has no
+# such expiry, and keeping the DB out of the blueprint means any managed
+# Postgres can back the app.
 # Docs: https://render.com/docs/blueprint-spec
 services:
   - type: web
@@ -14,11 +21,6 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.10"
-      # Auto-wired from the database defined below.
-      - key: DATABASE_URL
-        fromDatabase:
-          name: cartiq-db
-          property: connectionString
       - key: JWT_SECRET_KEY
         generateValue: true # Render generates a strong secret
       - key: JWT_ALGORITHM
@@ -36,6 +38,11 @@ services:
       - key: CACHE_TTL_SECONDS
         value: "1800"
       # Secrets / values set in the dashboard (sync:false = not stored in git):
+      # Neon postgresql:// URL. Paste it verbatim — config.py rewrites the
+      # scheme to asyncpg and drops the sslmode/channel_binding params that
+      # asyncpg rejects.
+      - key: DATABASE_URL
+        sync: false
       - key: QUICKCOMMERCE_API_KEY
         sync: false
       - key: GEMINI_API_KEY
@@ -44,7 +51,3 @@ services:
         sync: false
       - key: CORS_ORIGINS # your Vercel URL, e.g. https://cartiq.vercel.app
         sync: false
-
-databases:
-  - name: cartiq-db
-    plan: free

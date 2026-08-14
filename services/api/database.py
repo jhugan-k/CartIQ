@@ -23,6 +23,8 @@ engine = create_async_engine(
     settings.database_url,
     echo=False,        # set True to log every SQL statement while debugging
     pool_pre_ping=True,  # checks a connection is alive before using it
+    # TLS for managed Postgres, nothing extra for local Docker. See config.py.
+    connect_args=settings.db_connect_args,
 )
 
 # factory that produces AsyncSession objects (one per request).

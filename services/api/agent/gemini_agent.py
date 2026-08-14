@@ -10,6 +10,8 @@ tools are async and it keeps every step explicit and debuggable.
 """
 
 import asyncio
+import json
+import logging
 
 import google.genai as genai
 from google.genai import errors as genai_errors
@@ -19,6 +21,10 @@ from config import settings
 from schemas.chat import ChatMessage
 from agent.context import current_pincode, current_user_id
 from agent.tools import DISPATCH, FUNCTION_DECLARATIONS
+
+# logs the exact JSON each tool returns BEFORE the model sees it, so we can tell
+# whether a wrong price came from the tool/QC API or from the model mangling it.
+logger = logging.getLogger("cartiq.agent")
 
 _MAX_TOOL_ROUNDS = 5  # safety cap on tool-call iterations
 _HTTP_TIMEOUT_MS = 30_000  # per Gemini-request HTTP timeout
@@ -173,6 +179,15 @@ async def _drive(message: str, history: list[ChatMessage]) -> tuple[str, list[st
                     result = await handler(**args)
                 except Exception as exc:  # surface tool errors to the model
                     result = {"error": str(exc)}
+            # log the raw tool result the model is about to consume. This is the
+            # ground truth: if a price here is wrong it's the tool/QC API; if it's
+            # right here but wrong in the reply, the model corrupted it.
+            logger.info(
+                "TOOL %s args=%s -> %s",
+                fc.name,
+                json.dumps(args, ensure_ascii=False, default=str),
+                json.dumps(result, ensure_ascii=False, default=str),
+            )
             response_parts.append(
                 types.Part.from_function_response(name=fc.name, response=result)
             )

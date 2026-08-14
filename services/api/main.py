@@ -6,6 +6,8 @@ and exposes a /health check. Run locally with:
     uvicorn main:app --reload
 """
 
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -17,6 +19,14 @@ from config import settings
 from rate_limit import limiter
 from routers import alternatives, auth, cart, chat, compare, search, wishlist
 from services.qc_client import QuickCommerceError
+
+# uvicorn leaves the root logger at WARNING, so app INFO logs (e.g. the agent's
+# raw tool-output dumps) would be swallowed. Configure a root handler at INFO so
+# they reach stdout locally and in Render's logs.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 app = FastAPI(
     title="CartIQ API",

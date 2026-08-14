@@ -59,6 +59,9 @@ async def run_migrations_online() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,  # migrations are short CLI runs — no pool needed
+        # same TLS/driver kwargs the app engine uses. Migrations run BEFORE the
+        # server boots, so a connection mismatch here fails the whole deploy.
+        connect_args=settings.db_connect_args,
     )
     async with connectable.connect() as connection:
         # run_sync bridges Alembic's sync migration code onto the async connection.
