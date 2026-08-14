@@ -29,14 +29,13 @@ def _vaguer_query(product_name: str, brand: str | None) -> str:
 
 
 # find substitutes for an item by searching the brand-stripped term instead.
-# Public (no auth) → keyed per IP. Each call can miss cache and hit the vendor API.
-@router.get("/alternatives", response_model=SearchResponse)
-@limiter.limit("30/minute")
-async def alternatives(
-    request: Request,
-    product_name: str = Query(min_length=1),
-    brand: str | None = Query(None),
-    platforms: str = Query("blinkit,zepto,swiggy"),
+#
+# Shared implementation — plain args only, no Request/Depends, so the agent
+# tools and MCP server can call it. HTTP concerns live on the route below.
+async def find_alternatives(
+    product_name: str,
+    brand: str | None = None,
+    platforms: str = "blinkit,zepto,swiggy",
     lat: float = DEFAULT_LAT,
     lon: float = DEFAULT_LON,
     pincode: str = DEFAULT_PINCODE,
@@ -55,3 +54,18 @@ async def alternatives(
     response = SearchResponse(query=query, platforms=results)
     await set_cache(key, response.model_dump())
     return response
+
+
+# Public (no auth) → keyed per IP. Each call can miss cache and hit the vendor API.
+@router.get("/alternatives", response_model=SearchResponse)
+@limiter.limit("30/minute")
+async def alternatives(
+    request: Request,
+    product_name: str = Query(min_length=1),
+    brand: str | None = Query(None),
+    platforms: str = Query("blinkit,zepto,swiggy"),
+    lat: float = DEFAULT_LAT,
+    lon: float = DEFAULT_LON,
+    pincode: str = DEFAULT_PINCODE,
+) -> SearchResponse:
+    return await find_alternatives(product_name, brand, platforms, lat, lon, pincode)

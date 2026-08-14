@@ -13,13 +13,14 @@ router = APIRouter(tags=["search"])
 
 # search a product across platforms, serving from cache when possible so we
 # don't spend a vendor API credit on a repeat query.
-# Public (no auth) → keyed per IP. Caps vendor-API amplification on cache misses.
-@router.get("/search", response_model=SearchResponse)
-@limiter.limit("30/minute")
-async def search(
-    request: Request,
-    q: str = Query(min_length=1, description="Product to search for"),
-    platforms: str = Query("blinkit,zepto,swiggy", description="Comma-separated"),
+#
+# This is the shared implementation: a PLAIN async function taking plain args,
+# so the agent tools and the MCP server can call it directly. Keep it free of
+# Request/Depends — the HTTP concerns (validation, rate limiting) belong to the
+# thin route wrapper below, and the non-HTTP callers have no Request to give.
+async def search_products(
+    q: str,
+    platforms: str = "blinkit,zepto,swiggy",
     lat: float = DEFAULT_LAT,
     lon: float = DEFAULT_LON,
     pincode: str = DEFAULT_PINCODE,
@@ -39,3 +40,17 @@ async def search(
     response = SearchResponse(query=q, platforms=results)
     await set_cache(key, response.model_dump())
     return response
+
+
+# Public (no auth) → keyed per IP. Caps vendor-API amplification on cache misses.
+@router.get("/search", response_model=SearchResponse)
+@limiter.limit("30/minute")
+async def search(
+    request: Request,
+    q: str = Query(min_length=1, description="Product to search for"),
+    platforms: str = Query("blinkit,zepto,swiggy", description="Comma-separated"),
+    lat: float = DEFAULT_LAT,
+    lon: float = DEFAULT_LON,
+    pincode: str = DEFAULT_PINCODE,
+) -> SearchResponse:
+    return await search_products(q, platforms, lat, lon, pincode)

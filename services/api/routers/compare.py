@@ -118,10 +118,10 @@ def _best_match(query: str, products: list[Product]) -> Product | None:
 
 # price every cart item on every platform and report which platform wins.
 # searches run concurrently, so total time ≈ the slowest single search.
-# Tighter than /search: one call fans out to N concurrent vendor searches.
-@router.post("/cart/compare", response_model=CartCompareResponse)
-@limiter.limit("15/minute")
-async def compare(request: Request, req: CartCompareRequest) -> CartCompareResponse:
+#
+# Shared implementation — plain args only, no Request/Depends, so the agent
+# tools and MCP server can call it. HTTP concerns live on the route below.
+async def compare_cart(req: CartCompareRequest) -> CartCompareResponse:
     # fire all item searches concurrently.
     searches = await asyncio.gather(
         *(_search_item(item.query, req) for item in req.items)
@@ -175,3 +175,10 @@ async def compare(request: Request, req: CartCompareRequest) -> CartCompareRespo
         platform_totals=list(totals.values()),
         cheapest_platform=cheapest,
     )
+
+
+# Tighter than /search: one call fans out to N concurrent vendor searches.
+@router.post("/cart/compare", response_model=CartCompareResponse)
+@limiter.limit("15/minute")
+async def compare(request: Request, req: CartCompareRequest) -> CartCompareResponse:
+    return await compare_cart(req)

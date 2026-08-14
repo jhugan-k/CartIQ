@@ -1,9 +1,15 @@
 """The tools the AI agent can call.
 
-Each function reuses the Part 7 route handlers (which take plain args, no
-FastAPI Depends), so there is ONE implementation of the business logic shared by
-the REST API, the MCP server, and the Gemini agent. The functions return
-compact, JSON-serializable dicts (trimmed to keep the token cost down).
+Each function reuses the shared implementation behind the Part 7 routes — plain
+async functions taking plain args — so there is ONE implementation of the
+business logic shared by the REST API, the MCP server, and the Gemini agent.
+The functions return compact, JSON-serializable dicts (trimmed to keep the token
+cost down).
+
+Call the plain functions, NOT the route handlers: the routes carry HTTP-only
+concerns (`Request`, `Depends`, `@limiter.limit`) that we have nothing to supply
+here. Rate limiting is applied at the transport edge instead — the agent's whole
+path is already metered by the limit on /chat.
 
 The `FUNCTION_DECLARATIONS` describe these tools to Gemini; `DISPATCH` maps a
 tool name back to the coroutine that runs it.
@@ -12,9 +18,9 @@ tool name back to the coroutine that runs it.
 from google.genai import types
 
 from agent.context import current_pincode, current_user_id
-from routers.alternatives import alternatives as _alternatives_route
-from routers.compare import compare as _compare_route
-from routers.search import search as _search_route
+from routers.alternatives import find_alternatives as _find_alternatives
+from routers.compare import compare_cart as _compare_cart
+from routers.search import search_products as _search_products
 from schemas.compare import DEFAULT_PINCODE, CartCompareRequest, CartItem
 from services import cart_store, geocode
 
@@ -53,7 +59,7 @@ def _compact_product(p) -> dict:
 async def tool_search(query: str, platforms: str = "blinkit,zepto,swiggy") -> dict:
     """Search a single product across platforms."""
     lat, lon, pin = await _location()
-    resp = await _search_route(q=query, platforms=platforms, lat=lat, lon=lon, pincode=pin)
+    resp = await _search_products(q=query, platforms=platforms, lat=lat, lon=lon, pincode=pin)
     return {
         "query": resp.query,
         "platforms": [
@@ -77,7 +83,7 @@ async def tool_compare(items: list[dict], platforms: str = "blinkit,zepto,swiggy
     req = CartCompareRequest(
         items=cart_items, platforms=platform_list, lat=lat, lon=lon, pincode=pin
     )
-    resp = await _compare_route(req)
+    resp = await _compare_cart(req)
     return {
         "cheapest_platform": resp.cheapest_platform,
         "platform_totals": [
@@ -107,7 +113,7 @@ async def tool_compare(items: list[dict], platforms: str = "blinkit,zepto,swiggy
 async def tool_alternatives(product_name: str, brand: str = "") -> dict:
     """Find substitute products for an item by dropping its brand."""
     lat, lon, pin = await _location()
-    resp = await _alternatives_route(
+    resp = await _find_alternatives(
         product_name=product_name, brand=brand or None, lat=lat, lon=lon, pincode=pin
     )
     return {
