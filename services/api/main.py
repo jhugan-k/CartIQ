@@ -18,6 +18,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from config import settings
 from rate_limit import limiter
 from routers import alternatives, auth, cart, chat, compare, search, wishlist
+from services import budget
 from services.qc_client import QuickCommerceError
 
 # uvicorn leaves the root logger at WARNING, so app INFO logs (e.g. the agent's
@@ -70,3 +71,12 @@ async def quickcommerce_error_handler(request: Request, exc: QuickCommerceError)
 @limiter.exempt  # infra health checks must never be throttled
 async def health(request: Request) -> dict:
     return {"status": "ok", "mock_qc": settings.use_mock_qc}
+
+
+# Deliberately NOT part of /health: Render polls that every few seconds, and
+# each budget read costs Redis commands we would rather spend on the cache.
+@app.get("/budget", tags=["health"])
+async def budget_status(request: Request) -> dict:
+    """Today's spend against the daily caps. `used: -1` means Redis is
+    unreachable, in which case chat is refused unless BUDGET_FAIL_OPEN is set."""
+    return {"date": "today (UTC)", "caps": await budget.snapshot()}

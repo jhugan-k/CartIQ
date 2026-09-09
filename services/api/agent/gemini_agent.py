@@ -22,6 +22,8 @@ from config import settings
 from schemas.chat import ChatMessage
 from agent.context import current_pincode, current_user_id
 from agent.tools import DISPATCH, FUNCTION_DECLARATIONS
+from services import budget
+from services.budget import BudgetExceeded
 
 # logs the exact JSON each tool returns BEFORE the model sees it, so we can tell
 # whether a wrong price came from the tool/QC API or from the model mangling it.
@@ -61,7 +63,27 @@ _RETRY_BASE_DELAY_S = 1.0  # doubled each retry, plus jitter
 _MAX_PAGE_HINTS = 12
 _PAGE_HINT = (
     "Product pages you can open to read real ingredient lists. Open only the "
-    "2-3 you actually shortlist:\n"
+    "2-3 you actually shortlist. This list is about PAGE ACCESS ONLY — it must "
+    "not narrow which products you consider. Compare and rank every product "
+    "the tool returned, including ones absent from this list:\n"
+)
+# Verified 2026-09-09: the fetcher reads Blinkit product pages fine but Swiggy
+# Instamart returns URL_RETRIEVAL_STATUS_ERROR. Offering a URL that can't be
+# fetched costs a wasted round trip and makes the model tell the user about
+# "platform blocks", so only advertise hosts known to work. Zepto is untested —
+# it has not returned results for any query we've tried.
+_READABLE_PAGE_HOSTS = ("blinkit.com",)
+_PAGE_HINT_PARTIAL = (
+    "\nPages for the remaining products can't be opened — search the web for "
+    "those products' ingredients instead. They still compete on equal terms: "
+    "keep them in the comparison and recommend one if it is genuinely the best "
+    "value."
+)
+_NO_PAGES_HINT = (
+    "None of these product pages can be opened. Search the web for the "
+    "ingredients of the products you shortlist, and only fall back to general "
+    "knowledge if that also turns up nothing. Do not tell the user about "
+    "scraping or platform blocks — that is our problem, not theirs."
 )
 
 # The agent's whole behaviour contract. Two things it must hold at once:
@@ -92,13 +114,21 @@ plain price answer — extra analysis nobody asked for is a bug, not a bonus.
 
 IN ADVISORY MODE:
 - Prices, pack sizes and availability STILL come only from the tools.
-- READ THE PACK LABEL. Every detailed result carries a `url` to its product
-  page. Open the pages of the 2-3 candidates you actually shortlist — not all
-  of them, that is slow — and take the real ingredient list from there. Ground
-  your contents analysis in what you actually read.
-- If a page can't be retrieved, say so for that product and fall back to
-  general knowledge, labelled as such. NEVER present an ingredient list as
-  fact unless you actually read it.
+- READ THE PACK LABEL for the 2-3 candidates you shortlist — not all of them,
+  that is slow. Try these in order:
+  1. Open the product page `url` from the tool result.
+  2. If it won't open, SEARCH THE WEB for that product's ingredients. A
+     formulation belongs to the product, not to the app selling it, so the
+     brand's own page answers just as well as the listing.
+  3. Only if both fail, fall back to general knowledge and label it as such.
+- WEB SEARCH IS FOR FORMULATION FACTS ONLY. Never take a product, price, pack
+  size or availability from a search result, and NEVER recommend a product the
+  tools did not return. If a search surfaces some other product, ignore it
+  entirely — it may not even be buyable on these apps. Every product you name
+  and every price you quote must appear in the tool result you were given.
+- Never mention scraping, blocked pages or technical restrictions — they mean
+  nothing to the user. NEVER present an ingredient list as fact unless you
+  actually read it from a page or a search result.
 - Interpreting those ingredients (what a surfactant does, what suits dry or
   oily skin, why a formulation matters) is your own expertise — use it, and be
   clear about which parts are general knowledge rather than live data.
@@ -174,6 +204,10 @@ async def run_chat(
     """
     if not settings.gemini_api_key:
         raise GeminiNotConfigured("GEMINI_API_KEY is not set")
+    # Cheapest possible rejection: refuse at the door once the day's token
+    # budget is gone, before any vendor call is made. Raises BudgetExceeded,
+    # which the chat route turns into a 429.
+    await budget.ensure("gemini_requests")
     # make the user id + location visible to the tools for this request.
     current_user_id.set(user_id)
     current_pincode.set(pincode)
@@ -302,16 +336,35 @@ async def _run_tool(fc) -> tuple[types.Part, list[tuple[str, str]]]:
 # results back, and repeat until it returns a normal text reply.
 async def _drive(message: str, history: list[ChatMessage]) -> tuple[str, list[str]]:
     client = genai.Client(api_key=settings.gemini_api_key, http_options=_HTTP_OPTIONS)
+    tools = [
+        types.Tool(function_declarations=FUNCTION_DECLARATIONS),
+        # Lets the model read a product page itself — the QC API returns no
+        # ingredient data at all. Works on Blinkit; Swiggy blocks the fetcher
+        # (see _READABLE_PAGE_HOSTS). Costs nothing beyond tokens.
+        types.Tool(url_context=types.UrlContext()),
+    ]
+
+    # Grounding is the one metered capability (5,000 searches/month free, then
+    # $14 per 1,000), so it is the one we drop when the day's budget is gone.
+    # Dropping the tool degrades gracefully: price lookups are untouched and an
+    # advisory answer falls back to page reading plus labelled general
+    # knowledge, instead of the whole chat failing over a cost cap.
+    try:
+        await budget.ensure("grounded_searches")
+        # Search is here to explain a formulation, not to price one. Left to
+        # itself the model began recommending products the tools never returned
+        # and quoting prices read off the web — exactly what "prices only from
+        # tools" guards against. Restricting retail domains would be the
+        # structural fix, but `exclude_domains` is Gemini Enterprise only, so
+        # the SYSTEM_PROMPT rule is the only guard. Re-check it when the prompt
+        # changes.
+        tools.append(types.Tool(google_search=types.GoogleSearch()))
+    except BudgetExceeded as exc:
+        logger.warning("grounding disabled for this chat: %s", exc)
+
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
-        tools=[
-            types.Tool(function_declarations=FUNCTION_DECLARATIONS),
-            # Lets the model read a product page itself, which is the only way
-            # to get an ingredient list — the QC API doesn't return one. Google
-            # Search grounding would be the obvious alternative, but it has a
-            # separate quota that is effectively zero on the free tier.
-            types.Tool(url_context=types.UrlContext()),
-        ],
+        tools=tools,
         # Required whenever a built-in tool and our function declarations appear
         # together; without it the API rejects the request outright.
         tool_config=types.ToolConfig(include_server_side_tool_invocations=True),
@@ -326,6 +379,16 @@ async def _drive(message: str, history: list[ChatMessage]) -> tuple[str, list[st
     for _ in range(_MAX_TOOL_ROUNDS):
         resp = await _generate(client, contents, config)
         candidate = resp.candidates[0]
+
+        # Record what this round actually cost. Requests bill tokens; grounded
+        # searches bill separately per search, so count the queries the model
+        # really ran rather than assuming one per round.
+        await budget.spend("gemini_requests")
+        grounding = getattr(candidate, "grounding_metadata", None)
+        searches = getattr(grounding, "web_search_queries", None) or []
+        if searches:
+            await budget.spend("grounded_searches", len(searches))
+
         parts = candidate.content.parts or []
         function_calls = [p.function_call for p in parts if getattr(p, "function_call", None)]
 
@@ -344,11 +407,22 @@ async def _drive(message: str, history: list[ChatMessage]) -> tuple[str, list[st
         results = await asyncio.gather(*(_run_tool(fc) for fc in function_calls))
         response_parts = [part for part, _ in results]
 
-        # Repeat any product links as text so url_context can actually see them.
-        pages = [page for _, found in results for page in found][:_MAX_PAGE_HINTS]
-        if pages:
-            listing = "\n".join(f"- {name}: {url}" for name, url in pages)
-            response_parts.append(types.Part.from_text(text=_PAGE_HINT + listing))
+        # Repeat any product links as text so url_context can actually see them,
+        # but only the ones its fetcher can really open.
+        pages = [page for _, found in results for page in found]
+        readable = [
+            page
+            for page in pages
+            if any(host in page[1] for host in _READABLE_PAGE_HOSTS)
+        ][:_MAX_PAGE_HINTS]
+        if readable:
+            listing = "\n".join(f"- {name}: {url}" for name, url in readable)
+            hint = _PAGE_HINT + listing
+            if len(readable) < len(pages):
+                hint += _PAGE_HINT_PARTIAL
+            response_parts.append(types.Part.from_text(text=hint))
+        elif pages:
+            response_parts.append(types.Part.from_text(text=_NO_PAGES_HINT))
 
         # gemini expects function results back under the "user" role — "tool" is
         # the OpenAI convention and is rejected here with a 400.

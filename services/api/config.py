@@ -43,6 +43,23 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-flash-lite-latest"
 
+    # --- Daily spend caps (paid tier) ---
+    # Enforced across ALL users combined, because per-user rate limits cap
+    # abuse, not cost. Both reset at midnight UTC. Set either to 0 to switch
+    # that capability off completely.
+    #
+    # 150 grounded searches/day keeps us inside the 5,000/month that Google
+    # includes free (5000/31 is about 161); past that it is $14 per 1,000.
+    daily_grounded_searches: int = 150
+    # 500 generateContent calls/day. At roughly 4K input + 500 output tokens
+    # each on flash-lite paid rates ($0.30/$2.50 per 1M), that caps token spend
+    # near $1.25/day, and covers about 125 chats at 4 calls per chat.
+    daily_gemini_requests: int = 500
+    # The counters live in Redis. If Redis is unreachable we refuse chat rather
+    # than allow unmetered spend — set true to prefer availability over the
+    # budget guarantee.
+    budget_fail_open: bool = False
+
     # --- CORS ---
     cors_origins: str = "http://localhost:3000"
 
