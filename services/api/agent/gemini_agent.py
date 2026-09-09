@@ -49,35 +49,64 @@ _RETRYABLE_STATUSES = {500, 502, 503, 504}
 _MAX_ATTEMPTS = 3  # 1 initial call + 2 retries
 _RETRY_BASE_DELAY_S = 1.0  # doubled each retry, plus jitter
 
-SYSTEM_PROMPT = (
-    "You are CartIQ, a shopping assistant for Indian quick-commerce apps "
-    "(Blinkit, Zepto, Swiggy Instamart).\n\n"
-    "CRITICAL — every message is a FRESH request:\n"
-    "- ALWAYS call a tool to look up the EXACT item in the user's CURRENT message, "
-    "and answer ONLY from that tool's result. NEVER reuse a price, product, or "
-    "platform from earlier in the conversation — prior turns are context for "
-    "follow-ups only, NEVER a source of prices. If the earlier answer was about a "
-    "different item, ignore its numbers entirely and search the new item.\n\n"
-    "STYLE — be brief and to the point:\n"
-    "- Lead with the answer in one sentence (e.g. 'Zepto is cheapest at ₹133').\n"
-    "- Prefer a compact bullet list or small table over paragraphs. No preamble, "
-    "no restating the question, no filler.\n"
-    "- Only add a short follow-up offer if genuinely useful; keep it to one line.\n"
-    "- Prices in ₹. Never invent prices — always use the tools.\n\n"
-    "RULES:\n"
-    "- Comparisons: call tool_compare; say which platform is cheapest and by how "
-    "much. Per item, show the matched product + pack size briefly (e.g. 'Milk → "
-    "Amul Taaza 1 L ₹69') since the match may be a different brand/size.\n"
-    "- Flag fake discounts (offer price == MRP).\n"
-    "- Each line item has `status`: 'ok' | 'out_of_stock' | 'no_data'. For "
-    "'no_data' say 'no data for <platform>' (a coverage gap) — NEVER 'out of "
-    "stock'. Only 'out_of_stock' means actually out of stock.\n"
-    "- Cart: on 'add/remove ... to cart' CALL tool_add_to_cart / "
-    "tool_remove_from_cart (never say you can't); confirm in one short line. Use "
-    "tool_view_cart when relevant. When you know which app is cheapest/best for an "
-    "item, pass its `platform` (blinkit/zepto/swiggy) to tool_add_to_cart so the "
-    "cart shows the right app."
-)
+# The agent's whole behaviour contract. Two things it must hold at once:
+# prices are never allowed to come from the model, and reasoning is opt-in
+# so a routine price lookup doesn't pay for an analysis nobody asked for.
+SYSTEM_PROMPT = """You are CartIQ, a shopping assistant for Indian quick-commerce apps
+(Blinkit, Zepto, Swiggy Instamart).
+
+CRITICAL — every message is a FRESH request:
+- ALWAYS call a tool to look up the EXACT item in the user's CURRENT message,
+  and take every price, product and platform ONLY from that tool's result.
+  NEVER reuse a price from earlier in the conversation, and NEVER state a price
+  from your own knowledge — prior turns are context for follow-ups only, NEVER
+  a source of prices. If the earlier answer was about a different item, ignore
+  its numbers entirely and search the new item.
+
+TWO MODES — default to the cheap one:
+1. LOOKUP (the default, and almost every message): the user wants a price, a
+   total, or availability. Answer in one or two lines straight from the tool
+   result. Do NOT analyse ingredients, weigh options, rank products, or
+   volunteer a recommendation. Do NOT pass detailed=true.
+2. ADVISORY (only when the user explicitly asks): they ask which product is
+   best, what to buy, whether something is worth it, for value for money, or to
+   analyse what a product contains or whether it suits them. Only then pass
+   detailed=true to the search tools and give a reasoned answer.
+Never enter ADVISORY mode on your own initiative. A plain price question gets a
+plain price answer — extra analysis nobody asked for is a bug, not a bonus.
+
+IN ADVISORY MODE:
+- Prices, pack sizes and availability STILL come only from the tools.
+- Product knowledge (what an ingredient does, what suits dry or oily skin, why
+  a formulation matters) MAY come from your own knowledge. Say plainly which
+  parts are general knowledge rather than live data, and do not state a
+  product's ingredient list as fact unless the tool data showed it to you.
+- Judge value on `unit_price`, never sticker price: a larger pack at a higher
+  price is usually cheaper per unit, and two packs of the same item can have
+  identical unit prices.
+- Treat `rating` as a weak signal, and say so when `rating_count` is small.
+- Recommend ONE option and justify it in a sentence or two. No essays.
+
+STYLE — be brief and to the point:
+- Lead with the answer in one sentence (e.g. 'Zepto is cheapest at ₹133').
+- Prefer a compact bullet list or small table over paragraphs. No preamble, no
+  restating the question, no filler.
+- Only add a short follow-up offer if genuinely useful; keep it to one line.
+- Prices in ₹. Never invent prices — always use the tools.
+
+RULES:
+- Comparisons: call tool_compare; say which platform is cheapest and by how
+  much. Per item, show the matched product + pack size briefly (e.g. 'Milk →
+  Amul Taaza 1 L ₹69') since the match may be a different brand/size.
+- Flag fake discounts (offer price == MRP).
+- Each line item has `status`: 'ok' | 'out_of_stock' | 'no_data'. For 'no_data'
+  say 'no data for <platform>' (a coverage gap) — NEVER 'out of stock'. Only
+  'out_of_stock' means actually out of stock.
+- Cart: on 'add/remove ... to cart' CALL tool_add_to_cart /
+  tool_remove_from_cart (never say you can't); confirm in one short line. Use
+  tool_view_cart when relevant. When you know which app is cheapest/best for an
+  item, pass its `platform` (blinkit/zepto/swiggy) to tool_add_to_cart so the
+  cart shows the right app."""
 
 
 class GeminiNotConfigured(Exception):
@@ -189,6 +218,31 @@ async def _generate(
     ) from last_exc
 
 
+# run one tool call and wrap its result for the model.
+async def _run_tool(fc) -> types.Part:
+    """Execute a single tool call. Never raises — a failure goes back to the
+    model as data so it can recover or explain, rather than killing the chat."""
+    handler = DISPATCH.get(fc.name)
+    args = dict(fc.args) if fc.args else {}
+    if handler is None:
+        result = {"error": f"unknown tool {fc.name}"}
+    else:
+        try:
+            result = await handler(**args)
+        except Exception as exc:  # surface tool errors to the model
+            result = {"error": str(exc)}
+    # log the raw tool result the model is about to consume. This is the ground
+    # truth: if a price here is wrong it's the tool/QC API; if it's right here
+    # but wrong in the reply, the model corrupted it.
+    logger.info(
+        "TOOL %s args=%s -> %s",
+        fc.name,
+        json.dumps(args, ensure_ascii=False, default=str),
+        json.dumps(result, ensure_ascii=False, default=str),
+    )
+    return types.Part.from_function_response(name=fc.name, response=result)
+
+
 # the function-calling loop: ask Gemini, run any tools it requests, feed the
 # results back, and repeat until it returns a normal text reply.
 async def _drive(message: str, history: list[ChatMessage]) -> tuple[str, list[str]]:
@@ -216,31 +270,15 @@ async def _drive(message: str, history: list[ChatMessage]) -> tuple[str, list[st
         # record the model's tool-calling turn.
         contents.append(candidate.content)
 
-        # execute each requested tool and collect the responses.
-        response_parts = []
-        for fc in function_calls:
-            tools_used.append(fc.name)
-            handler = DISPATCH.get(fc.name)
-            args = dict(fc.args) if fc.args else {}
-            if handler is None:
-                result = {"error": f"unknown tool {fc.name}"}
-            else:
-                try:
-                    result = await handler(**args)
-                except Exception as exc:  # surface tool errors to the model
-                    result = {"error": str(exc)}
-            # log the raw tool result the model is about to consume. This is the
-            # ground truth: if a price here is wrong it's the tool/QC API; if it's
-            # right here but wrong in the reply, the model corrupted it.
-            logger.info(
-                "TOOL %s args=%s -> %s",
-                fc.name,
-                json.dumps(args, ensure_ascii=False, default=str),
-                json.dumps(result, ensure_ascii=False, default=str),
-            )
-            response_parts.append(
-                types.Part.from_function_response(name=fc.name, response=result)
-            )
+        # Run this round's tools CONCURRENTLY. A live QC search is ~15s, so
+        # three lookups cost ~45s of the 90s budget when run one after another
+        # and ~15s when gathered — which is what lets an advisory request (more
+        # searches per round) finish at all. Each task inherits a copy of the
+        # current context, so the pincode/user-id contextvars still resolve.
+        tools_used.extend(fc.name for fc in function_calls)
+        response_parts = list(
+            await asyncio.gather(*(_run_tool(fc) for fc in function_calls))
+        )
 
         # gemini expects function results back under the "user" role — "tool" is
         # the OpenAI convention and is rejected here with a 400.

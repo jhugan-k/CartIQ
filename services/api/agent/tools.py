@@ -23,6 +23,7 @@ from routers.compare import compare_cart as _compare_cart
 from routers.search import search_products as _search_products
 from schemas.compare import DEFAULT_PINCODE, CartCompareRequest, CartItem
 from services import cart_store, geocode
+from utils import units
 
 
 # current request's pincode, falling back to the default.
@@ -37,12 +38,21 @@ async def _location() -> tuple[float, float, str]:
     lat, lon = await geocode.pincode_to_latlon(pin)
     return lat, lon, pin
 
-_MAX_PRODUCTS = 5  # cap products per platform sent back to the model
+# Two budgets: a lookup ("what does milk cost") gets the cheap shape, and only
+# an explicit recommendation request pays for the wider, richer one.
+_MAX_PRODUCTS = 5  # per platform, normal lookups
+_MAX_PRODUCTS_DETAILED = 10  # per platform when the user asked for analysis
 
 
-# trim a product down to the few fields the model needs (keeps tokens cheap).
+# trim a product to the few fields a price answer needs (keeps tokens cheap).
 def _compact_product(p) -> dict:
-    return {
+    """The default shape: enough to answer "what does X cost", nothing more.
+
+    `unit_price` is here even in the cheap shape because without it the model
+    reads "1 Piece x 2 @ Rs 48" as pricier than "1 Piece @ Rs 24" when they are
+    identical value — that's a wrong answer, not merely a shallow one.
+    """
+    out = {
         "name": p.name,
         "brand": p.brand,
         "quantity": p.quantity,
@@ -51,22 +61,55 @@ def _compact_product(p) -> dict:
         "available": p.available,
         "fake_discount": p.fake_discount,
     }
+    price_per_unit = units.unit_price(p.offer_price, p.quantity)
+    if price_per_unit:
+        out["unit_price"] = price_per_unit
+    return out
+
+
+# the richer shape, reserved for "which should I buy" style questions.
+def _detailed_product(p) -> dict:
+    """Adds fields the QC API already returns and we otherwise discard.
+
+    Ratings are a quality signal, and the deeplink lets the model look at the
+    real product page when asked to judge a product's contents. Both cost
+    tokens on every row, so they are opt-in rather than always-on.
+    """
+    out = _compact_product(p)
+    if p.rating is not None:
+        out["rating"] = p.rating
+    if p.rating_count is not None:
+        out["rating_count"] = p.rating_count
+    if p.deeplink:
+        out["url"] = p.deeplink
+    return out
+
+
+# pick the shape and the row cap for this request's mode.
+def _shape(products: list, detailed: bool) -> list[dict]:
+    formatter = _detailed_product if detailed else _compact_product
+    cap = _MAX_PRODUCTS_DETAILED if detailed else _MAX_PRODUCTS
+    return [formatter(p) for p in products[:cap]]
 
 
 # ---------- Tool implementations ----------
 
 # tool: search one product across platforms and return compact results.
-async def tool_search(query: str, platforms: str = "blinkit,zepto,swiggy") -> dict:
-    """Search a single product across platforms."""
+async def tool_search(
+    query: str, platforms: str = "blinkit,zepto,swiggy", detailed: bool = False
+) -> dict:
+    """Search a single product across platforms.
+
+    `detailed` widens the result and adds ratings + product URLs; it roughly
+    quadruples the tokens this returns, so it is for recommendation requests
+    only, not routine price lookups.
+    """
     lat, lon, pin = await _location()
     resp = await _search_products(q=query, platforms=platforms, lat=lat, lon=lon, pincode=pin)
     return {
         "query": resp.query,
         "platforms": [
-            {
-                "platform": pr.platform,
-                "products": [_compact_product(p) for p in pr.products[:_MAX_PRODUCTS]],
-            }
+            {"platform": pr.platform, "products": _shape(pr.products, detailed)}
             for pr in resp.platforms
         ],
     }
@@ -110,7 +153,9 @@ async def tool_compare(items: list[dict], platforms: str = "blinkit,zepto,swiggy
 
 
 # tool: find substitutes for an item the user can't get.
-async def tool_alternatives(product_name: str, brand: str = "") -> dict:
+async def tool_alternatives(
+    product_name: str, brand: str = "", detailed: bool = False
+) -> dict:
     """Find substitute products for an item by dropping its brand."""
     lat, lon, pin = await _location()
     resp = await _find_alternatives(
@@ -119,10 +164,7 @@ async def tool_alternatives(product_name: str, brand: str = "") -> dict:
     return {
         "searched": resp.query,
         "platforms": [
-            {
-                "platform": pr.platform,
-                "products": [_compact_product(p) for p in pr.products[:_MAX_PRODUCTS]],
-            }
+            {"platform": pr.platform, "products": _shape(pr.products, detailed)}
             for pr in resp.platforms
         ],
     }
@@ -178,11 +220,26 @@ _platforms_schema = types.Schema(
     description="Comma-separated platforms. Default 'blinkit,zepto,swiggy'.",
 )
 
+# The model is the mode switch: it sees the user's intent, so it decides whether
+# this request is worth the extra tokens. Wording is deliberately restrictive —
+# the default has to stay cheap.
+_detailed_schema = types.Schema(
+    type="BOOLEAN",
+    description=(
+        "Default false. Set true ONLY when the user explicitly asks which "
+        "product is best, what to buy, whether something is worth it, for "
+        "value-for-money, or for analysis of a product's contents/suitability. "
+        "Returns more products plus ratings and product-page URLs, at a much "
+        "higher token cost. For a plain price or availability question, leave "
+        "it false."
+    ),
+)
+
 FUNCTION_DECLARATIONS = [
     types.FunctionDeclaration(
         name="tool_search",
         description="Search for a single product across quick-commerce platforms "
-        "and return prices, availability and fake-discount flags.",
+        "and return prices, availability, per-unit prices and fake-discount flags.",
         parameters=types.Schema(
             type="OBJECT",
             properties={
@@ -191,6 +248,7 @@ FUNCTION_DECLARATIONS = [
                     description="Product to search, e.g. 'amul butter'.",
                 ),
                 "platforms": _platforms_schema,
+                "detailed": _detailed_schema,
             },
             required=["query"],
         ),
@@ -232,6 +290,7 @@ FUNCTION_DECLARATIONS = [
                     type="STRING",
                     description="Brand to strip out, if known.",
                 ),
+                "detailed": _detailed_schema,
             },
             required=["product_name"],
         ),
