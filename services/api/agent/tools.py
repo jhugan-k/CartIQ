@@ -69,6 +69,11 @@ def _compact_product(p) -> dict:
     identical value — that's a wrong answer, not merely a shallow one.
     """
     out = {
+        # The platform is also the group key, but the model flattens these
+        # lists to rank by unit price across apps, and every answer line has to
+        # name the app. Repeating it per row costs ~3 tokens and removes the
+        # chance of a price being attributed to the wrong platform.
+        "platform": p.platform,
         "name": _trim_name(p.name),
         "brand": p.brand,
         "quantity": p.quantity,

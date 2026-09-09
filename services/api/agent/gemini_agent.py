@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import random
+import re
 
 import google.genai as genai
 from google.genai import errors as genai_errors
@@ -102,9 +103,12 @@ CRITICAL — every message is a FRESH request:
 
 TWO MODES — default to the cheap one:
 1. LOOKUP (the default, and almost every message): the user wants a price, a
-   total, or availability. Answer in one or two lines straight from the tool
-   result. Do NOT analyse ingredients, weigh options, rank products, or
-   volunteer a recommendation. Do NOT pass detailed=true.
+   total, availability, or to put something in their cart. Answer in one or two
+   lines straight from the tool result, cheapest first, and name the app beside
+   every price. Match the best product to what they asked for and, when they
+   asked for it in their cart, call tool_add_to_cart. Compare across apps as
+   usual. Do NOT analyse ingredients, weigh options, rank products with pros
+   and cons, or volunteer a recommendation. Do NOT pass detailed=true.
 2. ADVISORY (only when the user explicitly asks): they ask which product is
    best, what to buy, whether something is worth it, for value for money, or to
    analyse what a product contains or whether it suits them. Only then pass
@@ -121,11 +125,16 @@ IN ADVISORY MODE:
      formulation belongs to the product, not to the app selling it, so the
      brand's own page answers just as well as the listing.
   3. Only if both fail, fall back to general knowledge and label it as such.
-- WEB SEARCH IS FOR FORMULATION FACTS ONLY. Never take a product, price, pack
-  size or availability from a search result, and NEVER recommend a product the
-  tools did not return. If a search surfaces some other product, ignore it
-  entirely — it may not even be buyable on these apps. Every product you name
-  and every price you quote must appear in the tool result you were given.
+- PAGES AND SEARCH ARE FOR FORMULATION FACTS ONLY. A product page shows a
+  price too — ignore it. Never take a price, product name, pack size or
+  availability from a page you opened or from a search result; those come from
+  the tools and nowhere else. The page may be a different variant, a different
+  pack, or simply out of date.
+- NEVER name a product the tools did not return. If a page or a search turns up
+  some other product, ignore it entirely — it may not even be buyable on these
+  apps. Every product you list and every price you quote must appear verbatim
+  in the tool result you were given. If the tools returned three products, your
+  answer discusses those three and no others.
 - Never mention scraping, blocked pages or technical restrictions — they mean
   nothing to the user. NEVER present an ingredient list as fact unless you
   actually read it from a page or a search result.
@@ -136,13 +145,51 @@ IN ADVISORY MODE:
   price is usually cheaper per unit, and two packs of the same item can have
   identical unit prices.
 - Treat `rating` as a weak signal, and say so when `rating_count` is small.
-- Recommend ONE option and justify it in a sentence or two. No essays.
 
-STYLE — be brief and to the point:
-- Lead with the answer in one sentence (e.g. 'Zepto is cheapest at ₹133').
-- Prefer a compact bullet list or small table over paragraphs. No preamble, no
-  restating the question, no filler.
-- Only add a short follow-up offer if genuinely useful; keep it to one line.
+ADVISORY ANSWER SHAPE — follow it exactly:
+  RANK BY WHAT THE USER ASKED FOR, but FITNESS COMES FIRST. When they name a
+  need ("for dry skin", "for everyday use"), a product that does not serve that
+  need never ranks near the top however cheap it is — rank it last or leave it
+  out. Never put a product at #1 whose own Cons say it is wrong for the user.
+  Among the products that DO fit, order by: price when they asked for cheapest,
+  `unit_price` when they asked for value for money, and how well each serves
+  the attribute for "best <attribute>". Default to price, lowest first.
+  If you state what you ranked by, the order MUST actually match it — check the
+  list against your own stated criterion before sending.
+  Show AT MOST FIVE products — the five most relevant to what was asked. Drop
+  the rest without commenting on them.
+
+  Numbered, best first:
+
+  1. Dot & Key Barrier Repair Gentle Face Wash (100 ml) — [₹225]
+     - ₹225.00/100ml
+     - Rating: 4.5 (19,283 reviews)
+     - Blinkit
+     - Pros: one or two crisp lines
+     - Cons: one or two crisp lines
+  2. ...and so on, in rank order
+
+  Copy that layout exactly. The price on the heading line goes in square
+  brackets and the line ends there — no platform, no rating, nothing else.
+
+  Then close with a 3-4 line conclusion: name your recommended choice and say
+  why it wins for what THIS user asked for, not in general. Finish by asking
+  which product they would like added to their cart.
+  Ask — do not add anything yourself. Only call tool_add_to_cart once they
+  actually name one.
+Add no other headings, no intro, and no summary that repeats the list.
+
+STYLE — crisp and scannable, never essay-like:
+- ALWAYS make the app findable next to a price. In LOOKUP that means inline —
+  `Amul Butter (100 g) — ₹55 on Zepto`. In ADVISORY the platform has its own
+  sub-bullet, so do NOT repeat it on the numbered heading line; that line ends
+  at the bracketed price. The closing recommendation still names the app.
+  A price with no app attached is useless to someone about to buy.
+- Lead with the answer. No preamble, no restating the question, no filler.
+- Keep lines short. LOOKUP is one or two lines in total. ADVISORY uses the
+  numbered shape above, one line per sub-bullet, except Pros and Cons which may
+  run to two. Never write a prose paragraph about a product, and never fold
+  several products into one bullet.
 - Prices in ₹. Never invent prices — always use the tools.
 - Never emit citation markers like [1.1] or [2.3]. The user sees plain text
   with no source list, so they read as noise. If a claim came from a product
@@ -279,6 +326,55 @@ async def _generate(
     ) from last_exc
 
 
+# Any rupee figure in the model's reply, e.g. "₹1,234.50" -> "1,234.50".
+_PRICE_IN_TEXT = re.compile(r"₹\s?([\d,]+(?:\.\d+)?)")
+# How far a quoted price may drift from a real one before it counts as invented
+# (covers rounding like 225 vs 225.00, not a different price).
+_PRICE_TOLERANCE = 0.01
+
+
+# every rupee figure the tools actually returned, as floats.
+def _allowed_prices(result) -> set[float]:
+    """Collect prices a reply is allowed to quote: offer prices, MRPs, and the
+    numbers inside `unit_price` strings like "₹225/100ml"."""
+    found: set[float] = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in ("offer_price", "mrp", "line_total", "total") and isinstance(
+                    value, (int, float)
+                ):
+                    found.add(round(float(value), 2))
+                elif key == "unit_price" and isinstance(value, str):
+                    for raw in _PRICE_IN_TEXT.findall(value):
+                        found.add(round(float(raw.replace(",", "")), 2))
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(result)
+    return found
+
+
+# rupee figures in the reply that no tool ever returned.
+def _invented_prices(text: str, allowed: set[float]) -> list[str]:
+    """The whole product rests on prices being real. The model has repeatedly
+    quoted prices read off a product page or a search result despite the system
+    prompt forbidding it, so this checks rather than trusts."""
+    bad: list[str] = []
+    for raw in _PRICE_IN_TEXT.findall(text):
+        try:
+            value = round(float(raw.replace(",", "")), 2)
+        except ValueError:
+            continue
+        if not any(abs(value - ok) <= _PRICE_TOLERANCE for ok in allowed):
+            bad.append(raw)
+    return bad
+
+
 # pull (name, url) pairs out of a tool result so they can be shown as text.
 def _product_pages(result) -> list[tuple[str, str]]:
     """Walk a tool result for products carrying a page URL.
@@ -329,7 +425,73 @@ async def _run_tool(fc) -> tuple[types.Part, list[tuple[str, str]]]:
     return (
         types.Part.from_function_response(name=fc.name, response=result),
         _product_pages(result),
+        _allowed_prices(result),
     )
+
+
+# last line of defence on the one thing the product cannot get wrong: prices.
+async def _enforce_prices(
+    client: genai.Client,
+    config: types.GenerateContentConfig,
+    contents: list[types.Content],
+    candidate,
+    text: str,
+    allowed: set[float],
+) -> str:
+    """Check the reply's rupee figures against what the tools returned, and give
+    the model exactly one chance to correct itself.
+
+    The system prompt already forbids taking prices from a product page or a
+    search result, and the model still does it — it has quoted page prices and
+    invented product names across several runs. A wrong price is worse than no
+    answer here, so this verifies instead of trusting.
+    """
+    if not allowed:  # nothing was priced this turn (cart ops, chit-chat)
+        return text
+    invented = _invented_prices(text, allowed)
+    if not invented:
+        return text
+
+    logger.warning(
+        "reply quoted prices absent from tool data: %s (allowed: %s)",
+        invented,
+        sorted(allowed),
+    )
+    contents.append(candidate.content)
+    contents.append(
+        types.Content(
+            role="user",
+            parts=[
+                types.Part.from_text(
+                    text=(
+                        "STOP. These figures are not in the tool data: "
+                        + ", ".join(f"₹{p}" for p in invented)
+                        + ". You took them from a product page or a search "
+                        "result. The only prices you may quote are: "
+                        + ", ".join(f"₹{p:g}" for p in sorted(allowed))
+                        + ". Rewrite the answer using only those, and drop any "
+                        "product that was not in the tool result. Same format."
+                    )
+                )
+            ],
+        )
+    )
+    try:
+        retry = await _generate(client, contents, config)
+        await budget.spend("gemini_requests")
+        fixed = _extract_text(retry.candidates[0].content.parts or [])
+    except Exception as exc:  # a failed correction must not lose the answer
+        logger.warning("price correction failed: %s", exc)
+        return text
+
+    still_bad = _invented_prices(fixed, allowed) if fixed else invented
+    if fixed and not still_bad:
+        logger.info("price correction succeeded")
+        return fixed
+    # Corrected once and still wrong: return the retry if we got one (it is no
+    # worse) and leave the warning in the logs for whoever is watching.
+    logger.warning("price correction did not clear: %s", still_bad)
+    return fixed or text
 
 
 # the function-calling loop: ask Gemini, run any tools it requests, feed the
@@ -375,6 +537,9 @@ async def _drive(message: str, history: list[ChatMessage]) -> tuple[str, list[st
     contents.append(types.Content(role="user", parts=[types.Part.from_text(text=message)]))
 
     tools_used: list[str] = []
+    # every price the tools returned this turn — the only figures the final
+    # answer is allowed to quote (see _enforce_prices).
+    allowed_prices: set[float] = set()
 
     for _ in range(_MAX_TOOL_ROUNDS):
         resp = await _generate(client, contents, config)
@@ -393,7 +558,11 @@ async def _drive(message: str, history: list[ChatMessage]) -> tuple[str, list[st
         function_calls = [p.function_call for p in parts if getattr(p, "function_call", None)]
 
         if not function_calls:
-            return _extract_text(parts) or "(no response)", tools_used
+            text = _extract_text(parts) or "(no response)"
+            text = await _enforce_prices(
+                client, config, contents, candidate, text, allowed_prices
+            )
+            return text, tools_used
 
         # record the model's tool-calling turn.
         contents.append(candidate.content)
@@ -405,11 +574,13 @@ async def _drive(message: str, history: list[ChatMessage]) -> tuple[str, list[st
         # current context, so the pincode/user-id contextvars still resolve.
         tools_used.extend(fc.name for fc in function_calls)
         results = await asyncio.gather(*(_run_tool(fc) for fc in function_calls))
-        response_parts = [part for part, _ in results]
+        response_parts = [part for part, _, _ in results]
+        for _, _, prices in results:
+            allowed_prices |= prices
 
         # Repeat any product links as text so url_context can actually see them,
         # but only the ones its fetcher can really open.
-        pages = [page for _, found in results for page in found]
+        pages = [page for _, found, _ in results for page in found]
         readable = [
             page
             for page in pages
