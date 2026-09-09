@@ -28,7 +28,11 @@ from agent.tools import DISPATCH, FUNCTION_DECLARATIONS
 logger = logging.getLogger("cartiq.agent")
 
 _MAX_TOOL_ROUNDS = 5  # safety cap on tool-call iterations
-_HTTP_TIMEOUT_MS = 30_000  # per Gemini-request HTTP timeout
+# Per-request HTTP timeout. 30s was too tight: an advisory turn sends ~20
+# products back and the model has to reason over all of them, which took longer
+# than that and surfaced as a blank "Gemini request failed:" in the UI. 60s
+# still leaves room inside _OVERALL_TIMEOUT_S for a second round.
+_HTTP_TIMEOUT_MS = 60_000
 # A live QC groupsearch takes ~15s, and a multi-item cart compare fans out
 # several of them, so the whole chat gets a generous cap.
 _OVERALL_TIMEOUT_S = 90  # hard cap on the whole chat (all tool rounds)
@@ -196,7 +200,10 @@ async def _generate(
                 raise GeminiError(f"Gemini request failed: {exc}") from exc
             last_exc = exc  # overloaded — fall through to the backoff below
         except Exception as exc:  # httpx timeouts / network errors from the SDK
-            raise GeminiError(f"Gemini request failed: {exc}") from exc
+            # A timeout's str() is empty, which rendered as a bare "Gemini
+            # request failed:" with nothing after it. Say something useful.
+            detail = str(exc) or f"{type(exc).__name__} after {_HTTP_TIMEOUT_MS // 1000}s"
+            raise GeminiError(f"Gemini request failed: {detail}") from exc
 
         if attempt < _MAX_ATTEMPTS - 1:
             # jitter so several concurrent chats don't retry in lockstep and

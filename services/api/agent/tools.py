@@ -41,7 +41,23 @@ async def _location() -> tuple[float, float, str]:
 # Two budgets: a lookup ("what does milk cost") gets the cheap shape, and only
 # an explicit recommendation request pays for the wider, richer one.
 _MAX_PRODUCTS = 5  # per platform, normal lookups
-_MAX_PRODUCTS_DETAILED = 10  # per platform when the user asked for analysis
+# 10 proved too many: three platforms x 10 rows of marketing-length names made
+# the follow-up request slow enough to time out. Six is still a real shortlist.
+_MAX_PRODUCTS_DETAILED = 6  # per platform when the user asked for analysis
+
+# Vendor titles run to marketing copy ("... | For All Skin Types | 250ml"),
+# which is pure token cost — the brand, pack size and price carry the meaning.
+_MAX_NAME_CHARS = 90
+
+
+# shorten a marketing-length product title without cutting mid-word.
+def _trim_name(name: str) -> str:
+    if len(name) <= _MAX_NAME_CHARS:
+        return name
+    cut = name[:_MAX_NAME_CHARS]
+    # prefer breaking at the vendor's own separator, else the last space.
+    stop = max(cut.rfind(" | "), cut.rfind(", "), cut.rfind(" "))
+    return (cut[:stop] if stop > _MAX_NAME_CHARS // 2 else cut).rstrip(" ,|") + "..."
 
 
 # trim a product to the few fields a price answer needs (keeps tokens cheap).
@@ -53,7 +69,7 @@ def _compact_product(p) -> dict:
     identical value — that's a wrong answer, not merely a shallow one.
     """
     out = {
-        "name": p.name,
+        "name": _trim_name(p.name),
         "brand": p.brand,
         "quantity": p.quantity,
         "mrp": p.mrp,
@@ -77,7 +93,7 @@ def _detailed_product(p) -> dict:
     """
     out = _compact_product(p)
     if p.rating is not None:
-        out["rating"] = p.rating
+        out["rating"] = round(p.rating, 1)
     if p.rating_count is not None:
         out["rating_count"] = p.rating_count
     if p.deeplink:
