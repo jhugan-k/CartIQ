@@ -7,6 +7,7 @@ and exposes a /health check. Run locally with:
 """
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +17,8 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from config import settings
+from mcp_server import mcp
+from mcp.server.transport_security import TransportSecuritySettings
 from rate_limit import limiter
 from routers import alternatives, auth, cart, chat, compare, search, wishlist
 from services import budget
@@ -29,10 +32,34 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
+# The MCP server as an ASGI app, so one Render service serves both the REST API
+# and MCP. `stateless_http` keeps each call self-contained: no server-side
+# session to lose when the free instance sleeps or restarts, which is what a
+# remote client hitting a cold service needs.
+_mcp_app = mcp.streamable_http_app(
+    streamable_http_path="/",  # mounted at /mcp below, so "/" here avoids /mcp/mcp
+    stateless_http=True,
+    transport_security=TransportSecuritySettings(
+        allowed_hosts=settings.mcp_allowed_hosts_list,
+        allowed_origins=settings.mcp_allowed_hosts_list,
+    ),
+)
+
+
+# Mounting a Starlette app does NOT run its lifespan, and the MCP session
+# manager is started there — without this the endpoint accepts connections and
+# then fails on the first request. Drive it from the parent app's lifespan.
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    async with _mcp_app.router.lifespan_context(_mcp_app):
+        yield
+
+
 app = FastAPI(
     title="CartIQ API",
     version="1.0.0",
     description="Quick-commerce cart comparator across Blinkit, Zepto and Swiggy.",
+    lifespan=lifespan,
 )
 
 # Rate limiting: register the shared limiter, a 429 handler (adds Retry-After
@@ -58,6 +85,9 @@ app.include_router(alternatives.router)
 app.include_router(wishlist.router)
 app.include_router(cart.router)
 app.include_router(chat.router)
+
+# Remote MCP endpoint: https://<host>/mcp — the link you hand to any MCP client.
+app.mount("/mcp", _mcp_app)
 
 
 @app.exception_handler(QuickCommerceError)

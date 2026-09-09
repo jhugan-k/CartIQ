@@ -37,6 +37,20 @@ services:
         value: gemini-flash-lite-latest
       - key: CACHE_TTL_SECONDS
         value: "1800"
+      # The MCP transport rejects any Host header not listed here (DNS-rebinding
+      # protection), so the public hostname must be present or /mcp returns 421.
+      # Add any custom domain here too.
+      - key: MCP_ALLOWED_HOSTS
+        value: cartiq-api.onrender.com
+      # Daily spend ceilings, enforced across all callers (services/budget.py).
+      # qc_searches matters most: the MCP endpoint is unauthenticated, and each
+      # search costs one QuickCommerce credit per platform.
+      - key: DAILY_QC_SEARCHES
+        value: "200"
+      - key: DAILY_GEMINI_REQUESTS
+        value: "500"
+      - key: DAILY_GROUNDED_SEARCHES
+        value: "150"
       # Secrets / values set in the dashboard (sync:false = not stored in git):
       # Neon postgresql:// URL. Paste it verbatim — config.py rewrites the
       # scheme to asyncpg and drops the sslmode/channel_binding params that

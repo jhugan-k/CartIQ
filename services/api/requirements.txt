@@ -28,4 +28,7 @@ httpx==0.28.1                 # async HTTP client (QuickCommerce API)
 
 # ---------- AI layer (Parts 8) ----------
 google-genai==2.11.0          # Gemini client (2.x needed for thought-signature models)
-mcp==1.2.0                    # Model Context Protocol server
+mcp==2.2.0                    # MCP server + client. 2.x is required for the
+                              # Streamable HTTP transport that makes the
+                              # server reachable by URL; 1.x was stdio/SSE
+                              # only. Note 2.x renamed FastMCP -> MCPServer.

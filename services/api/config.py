@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     # each on flash-lite paid rates ($0.30/$2.50 per 1M), that caps token spend
     # near $1.25/day, and covers about 125 chats at 4 calls per chat.
     daily_gemini_requests: int = 500
+    # QuickCommerce bills 1 credit PER PLATFORM per search, so a 3-app search
+    # costs 3. This is the cap that matters for the public MCP endpoint, where
+    # callers are anonymous and every tool call spends real vendor credits.
+    daily_qc_searches: int = 200
     # The counters live in Redis. If Redis is unreachable we refuse chat rather
     # than allow unmetered spend — set true to prefer availability over the
     # budget guarantee.
@@ -62,6 +66,12 @@ class Settings(BaseSettings):
 
     # --- CORS ---
     cors_origins: str = "http://localhost:3000"
+
+    # --- MCP (remote, Streamable HTTP) ---
+    # The MCP transport enables DNS-rebinding protection by default, which
+    # rejects any Host header not listed here. Behind Render that must include
+    # the public hostname or every request 421s.
+    mcp_allowed_hosts: str = "localhost,127.0.0.1,localhost:8000,127.0.0.1:8000"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -117,6 +127,11 @@ class Settings(BaseSettings):
             # cache keeps either endpoint working.
             "statement_cache_size": 0,
         }
+
+    @property
+    def mcp_allowed_hosts_list(self) -> list[str]:
+        """MCP_ALLOWED_HOSTS is comma-separated in env; expose it as a list."""
+        return [h.strip() for h in self.mcp_allowed_hosts.split(",") if h.strip()]
 
     @property
     def cors_origins_list(self) -> list[str]:

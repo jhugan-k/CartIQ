@@ -6,6 +6,8 @@ the two things that actually cost money and cap them across all users combined:
   gemini_requests   — every generateContent call (token spend)
   grounded_searches — Google Search grounding, metered separately at
                       5,000/month free, then $14 per 1,000
+  qc_searches       — QuickCommerce product searches, billed per platform
+                      hit; the guard that matters for the public MCP endpoint
 
 A per-user limit can't do this job: fifty users each inside their allowance
 still spend fifty times the money.
@@ -34,6 +36,7 @@ def _cap(kind: str) -> int:
     return {
         "gemini_requests": settings.daily_gemini_requests,
         "grounded_searches": settings.daily_grounded_searches,
+        "qc_searches": settings.daily_qc_searches,
     }[kind]
 
 
@@ -103,7 +106,7 @@ async def spend(kind: str, amount: int = 1) -> None:
 # small snapshot for a status endpoint or a log line.
 async def snapshot() -> dict[str, dict[str, int]]:
     out: dict[str, dict[str, int]] = {}
-    for kind in ("gemini_requests", "grounded_searches"):
+    for kind in ("gemini_requests", "grounded_searches", "qc_searches"):
         try:
             out[kind] = {"used": await used(kind), "cap": _cap(kind)}
         except Exception:
