@@ -53,6 +53,17 @@ _RETRYABLE_STATUSES = {500, 502, 503, 504}
 _MAX_ATTEMPTS = 3  # 1 initial call + 2 retries
 _RETRY_BASE_DELAY_S = 1.0  # doubled each retry, plus jitter
 
+# url_context only fetches URLs it sees in TEXT — a URL inside a functionResponse
+# payload is invisible to it (verified: the model claimed pages were
+# "inaccessible" without ever fetching one). So after each tool round we repeat
+# the product links as a text part. Capped, because an advisory search can
+# return ~18 of them and the point is for the model to open 2-3.
+_MAX_PAGE_HINTS = 12
+_PAGE_HINT = (
+    "Product pages you can open to read real ingredient lists. Open only the "
+    "2-3 you actually shortlist:\n"
+)
+
 # The agent's whole behaviour contract. Two things it must hold at once:
 # prices are never allowed to come from the model, and reasoning is opt-in
 # so a routine price lookup doesn't pay for an analysis nobody asked for.
@@ -81,10 +92,16 @@ plain price answer — extra analysis nobody asked for is a bug, not a bonus.
 
 IN ADVISORY MODE:
 - Prices, pack sizes and availability STILL come only from the tools.
-- Product knowledge (what an ingredient does, what suits dry or oily skin, why
-  a formulation matters) MAY come from your own knowledge. Say plainly which
-  parts are general knowledge rather than live data, and do not state a
-  product's ingredient list as fact unless the tool data showed it to you.
+- READ THE PACK LABEL. Every detailed result carries a `url` to its product
+  page. Open the pages of the 2-3 candidates you actually shortlist — not all
+  of them, that is slow — and take the real ingredient list from there. Ground
+  your contents analysis in what you actually read.
+- If a page can't be retrieved, say so for that product and fall back to
+  general knowledge, labelled as such. NEVER present an ingredient list as
+  fact unless you actually read it.
+- Interpreting those ingredients (what a surfactant does, what suits dry or
+  oily skin, why a formulation matters) is your own expertise — use it, and be
+  clear about which parts are general knowledge rather than live data.
 - Judge value on `unit_price`, never sticker price: a larger pack at a higher
   price is usually cheaper per unit, and two packs of the same item can have
   identical unit prices.
@@ -97,6 +114,9 @@ STYLE — be brief and to the point:
   restating the question, no filler.
 - Only add a short follow-up offer if genuinely useful; keep it to one line.
 - Prices in ₹. Never invent prices — always use the tools.
+- Never emit citation markers like [1.1] or [2.3]. The user sees plain text
+  with no source list, so they read as noise. If a claim came from a product
+  page you opened, just say so in words.
 
 RULES:
 - Comparisons: call tool_compare; say which platform is cheapest and by how
@@ -225,10 +245,35 @@ async def _generate(
     ) from last_exc
 
 
+# pull (name, url) pairs out of a tool result so they can be shown as text.
+def _product_pages(result) -> list[tuple[str, str]]:
+    """Walk a tool result for products carrying a page URL.
+
+    Only the detailed product shape includes `url`, so this returns nothing for
+    ordinary price lookups — which is what keeps page-reading opt-in.
+    """
+    found: list[tuple[str, str]] = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            url, name = node.get("url"), node.get("name")
+            if isinstance(url, str) and isinstance(name, str):
+                found.append((name, url))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(result)
+    return found
+
+
 # run one tool call and wrap its result for the model.
-async def _run_tool(fc) -> types.Part:
-    """Execute a single tool call. Never raises — a failure goes back to the
-    model as data so it can recover or explain, rather than killing the chat."""
+async def _run_tool(fc) -> tuple[types.Part, list[tuple[str, str]]]:
+    """Execute a single tool call, returning its response part and any product
+    pages it mentioned. Never raises — a failure goes back to the model as data
+    so it can recover or explain, rather than killing the chat."""
     handler = DISPATCH.get(fc.name)
     args = dict(fc.args) if fc.args else {}
     if handler is None:
@@ -247,7 +292,10 @@ async def _run_tool(fc) -> types.Part:
         json.dumps(args, ensure_ascii=False, default=str),
         json.dumps(result, ensure_ascii=False, default=str),
     )
-    return types.Part.from_function_response(name=fc.name, response=result)
+    return (
+        types.Part.from_function_response(name=fc.name, response=result),
+        _product_pages(result),
+    )
 
 
 # the function-calling loop: ask Gemini, run any tools it requests, feed the
@@ -256,7 +304,17 @@ async def _drive(message: str, history: list[ChatMessage]) -> tuple[str, list[st
     client = genai.Client(api_key=settings.gemini_api_key, http_options=_HTTP_OPTIONS)
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
-        tools=[types.Tool(function_declarations=FUNCTION_DECLARATIONS)],
+        tools=[
+            types.Tool(function_declarations=FUNCTION_DECLARATIONS),
+            # Lets the model read a product page itself, which is the only way
+            # to get an ingredient list — the QC API doesn't return one. Google
+            # Search grounding would be the obvious alternative, but it has a
+            # separate quota that is effectively zero on the free tier.
+            types.Tool(url_context=types.UrlContext()),
+        ],
+        # Required whenever a built-in tool and our function declarations appear
+        # together; without it the API rejects the request outright.
+        tool_config=types.ToolConfig(include_server_side_tool_invocations=True),
         temperature=0.3,
     )
 
@@ -283,9 +341,14 @@ async def _drive(message: str, history: list[ChatMessage]) -> tuple[str, list[st
         # searches per round) finish at all. Each task inherits a copy of the
         # current context, so the pincode/user-id contextvars still resolve.
         tools_used.extend(fc.name for fc in function_calls)
-        response_parts = list(
-            await asyncio.gather(*(_run_tool(fc) for fc in function_calls))
-        )
+        results = await asyncio.gather(*(_run_tool(fc) for fc in function_calls))
+        response_parts = [part for part, _ in results]
+
+        # Repeat any product links as text so url_context can actually see them.
+        pages = [page for _, found in results for page in found][:_MAX_PAGE_HINTS]
+        if pages:
+            listing = "\n".join(f"- {name}: {url}" for name, url in pages)
+            response_parts.append(types.Part.from_text(text=_PAGE_HINT + listing))
 
         # gemini expects function results back under the "user" role — "tool" is
         # the OpenAI convention and is rejected here with a 400.
