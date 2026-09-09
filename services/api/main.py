@@ -46,6 +46,26 @@ _mcp_app = mcp.streamable_http_app(
 )
 
 
+class MCPTrailingSlash:
+    """Serve /mcp and /mcp/ identically.
+
+    Mounting at "/mcp" makes Starlette answer a request for exactly "/mcp" with
+    a 307 to "/mcp/". Some MCP clients do not follow a redirect on POST and
+    simply report the server as unreachable — Claude Desktop's connector check
+    shows it as "Not found: 307". The whole point of a remote server is a link
+    people can paste, and nobody pastes a trailing slash, so rewrite the path
+    before routing instead of pushing the problem onto whoever gets the link.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http" and scope.get("path") == "/mcp":
+            scope = dict(scope, path="/mcp/", raw_path=b"/mcp/")
+        await self.app(scope, receive, send)
+
+
 # Mounting a Starlette app does NOT run its lifespan, and the MCP session
 # manager is started there — without this the endpoint accepts connections and
 # then fails on the first request. Drive it from the parent app's lifespan.
@@ -66,6 +86,9 @@ app = FastAPI(
 # and X-RateLimit-* headers), and the middleware that enforces the global
 # default limit on every route. Per-route @limiter.limit(...) decorators layer
 # stricter limits on top.
+# Added first so it wraps everything and rewrites the path before routing.
+app.add_middleware(MCPTrailingSlash)
+
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
