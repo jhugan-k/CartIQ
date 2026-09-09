@@ -12,6 +12,7 @@ tools are async and it keeps every step explicit and debuggable.
 import asyncio
 import json
 import logging
+import random
 
 import google.genai as genai
 from google.genai import errors as genai_errors
@@ -39,6 +40,14 @@ _HTTP_OPTIONS = types.HttpOptions(
     timeout=_HTTP_TIMEOUT_MS,
     retry_options=types.HttpRetryOptions(attempts=1),
 )
+
+# Transient server-side failures: the model is overloaded (503) or we hit a
+# gateway/internal error. Nothing about the request is wrong and they usually
+# clear within a second or two, so these are the only statuses worth retrying —
+# a 429 (quota) or any other 4xx will not fix itself.
+_RETRYABLE_STATUSES = {500, 502, 503, 504}
+_MAX_ATTEMPTS = 3  # 1 initial call + 2 retries
+_RETRY_BASE_DELAY_S = 1.0  # doubled each retry, plus jitter
 
 SYSTEM_PROMPT = (
     "You are CartIQ, a shopping assistant for Indian quick-commerce apps "
@@ -125,6 +134,61 @@ async def run_chat(
         ) from exc
 
 
+# one Gemini call, with a short retry on the transient 5xx the hosted models
+# throw under load.
+async def _generate(
+    client: genai.Client,
+    contents: list[types.Content],
+    config: types.GenerateContentConfig,
+) -> types.GenerateContentResponse:
+    """Call generate_content, retrying only self-clearing server errors.
+
+    The shared flash/flash-lite endpoints return 503 UNAVAILABLE ("high demand")
+    often enough that a single attempt makes the chat look broken. The SDK's own
+    backoff stays off (see _HTTP_OPTIONS) because it also sleeps ~40s on a 429;
+    this loop retries the overload statuses only, and briefly. Worst case it
+    adds ~3.5s, well inside _OVERALL_TIMEOUT_S.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            return await client.aio.models.generate_content(
+                model=settings.gemini_model, contents=contents, config=config
+            )
+        except genai_errors.ClientError as exc:
+            if getattr(exc, "code", None) == 429:
+                raise GeminiError(
+                    "Gemini quota exceeded for this API key/model. Try again later "
+                    "or switch GEMINI_MODEL."
+                ) from exc
+            raise GeminiError(f"Gemini request failed: {exc}") from exc
+        except genai_errors.APIError as exc:
+            if getattr(exc, "code", None) not in _RETRYABLE_STATUSES:
+                raise GeminiError(f"Gemini request failed: {exc}") from exc
+            last_exc = exc  # overloaded — fall through to the backoff below
+        except Exception as exc:  # httpx timeouts / network errors from the SDK
+            raise GeminiError(f"Gemini request failed: {exc}") from exc
+
+        if attempt < _MAX_ATTEMPTS - 1:
+            # jitter so several concurrent chats don't retry in lockstep and
+            # re-overload the same model.
+            delay = _RETRY_BASE_DELAY_S * 2**attempt + random.uniform(0, 0.4)
+            logger.warning(
+                "Gemini %s on %s — retrying in %.1fs (attempt %d/%d)",
+                getattr(last_exc, "code", "5xx"),
+                settings.gemini_model,
+                delay,
+                attempt + 1,
+                _MAX_ATTEMPTS,
+            )
+            await asyncio.sleep(delay)
+
+    raise GeminiError(
+        "Gemini is temporarily overloaded and didn't recover after a few "
+        "retries. Please try again in a moment."
+    ) from last_exc
+
+
 # the function-calling loop: ask Gemini, run any tools it requests, feed the
 # results back, and repeat until it returns a normal text reply.
 async def _drive(message: str, history: list[ChatMessage]) -> tuple[str, list[str]]:
@@ -141,21 +205,7 @@ async def _drive(message: str, history: list[ChatMessage]) -> tuple[str, list[st
     tools_used: list[str] = []
 
     for _ in range(_MAX_TOOL_ROUNDS):
-        try:
-            resp = await client.aio.models.generate_content(
-                model=settings.gemini_model, contents=contents, config=config
-            )
-        except genai_errors.ClientError as exc:
-            if getattr(exc, "code", None) == 429:
-                raise GeminiError(
-                    "Gemini quota exceeded for this API key/model. Try again later "
-                    "or switch GEMINI_MODEL."
-                ) from exc
-            raise GeminiError(f"Gemini request failed: {exc}") from exc
-        except genai_errors.APIError as exc:
-            raise GeminiError(f"Gemini request failed: {exc}") from exc
-        except Exception as exc:  # httpx timeouts / network errors from the SDK
-            raise GeminiError(f"Gemini request failed: {exc}") from exc
+        resp = await _generate(client, contents, config)
         candidate = resp.candidates[0]
         parts = candidate.content.parts or []
         function_calls = [p.function_call for p in parts if getattr(p, "function_call", None)]
